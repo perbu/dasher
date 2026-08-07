@@ -75,7 +75,7 @@ func (y *Yr) fetch(ctx context.Context) error {
 	req.Header.Set("User-Agent", y.cfg.UserAgent)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := y.client.Do(req)
+	resp, err := do("yr", y.client, req)
 	if err != nil {
 		return fmt.Errorf("request: %w", err)
 	}

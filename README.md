@@ -57,7 +57,7 @@ yr:
   interval: 15m
 
 publish:
-  interval: 30s
+  interval: 30s              # heartbeat ceiling, not a fixed cadence
 ```
 
 Durations use Go syntax (`30s`, `5m`, `1h`). Required values: `mqtt.tls_cert`,
@@ -151,13 +151,41 @@ export MQTT_TLS_CERT=cert.pem MQTT_TLS_KEY=key.pem MQTT_CLIENT_CA=certs/ca.crt \
 ```
 
 Add `-debug` while developing to print every published payload to stdout
-instead of publishing it. In this mode the MQTT broker is not started at
-all, so no certificates or `mqtt.tls_*` values are needed. Never run with
-`-debug` in production.
+instead of publishing it, along with per-request timing. In this mode the
+MQTT broker is not started at all, so no certificates or `mqtt.tls_*` values
+are needed. Never run with `-debug` in production.
 
 ```sh
 ./dasher -debug
 ```
+
+```
+[yr] -> GET api.met.no/weatherapi/locationforecast/2.0/compact
+[claude] access token valid for another 7h23m0s
+[claude] -> GET api.anthropic.com/api/oauth/usage
+[yr] <- api.met.no/weatherapi/locationforecast/2.0/compact 200 OK in 98ms
+[yr] fetch ok in 100ms
+[claude] <- api.anthropic.com/api/oauth/usage 200 OK in 477ms
+[claude] fetch ok in 477ms
+[publisher] changed: 838 bytes
+{ ...payload... }
+```
+
+Only host and path are logged, never query strings or headers. Without
+`-debug` the service is quiet: fetch failures (with their elapsed time, so a
+timeout is distinguishable from a rejection) and token refreshes only.
+
+### When payloads are published
+
+Every successful fetch is published immediately, so a restart fills the
+dashboard within about a second instead of leaving it blank. Sources that
+land close together coalesce into one message. `publish.interval` is the
+**heartbeat ceiling** — if nothing has been fetched in that long, the
+retained message is republished anyway. In `-debug` each publish is tagged
+`changed`, `heartbeat` or `shutdown`.
+
+Note the trigger is a completed fetch, not a changed value: a fetch that
+returns identical numbers still bumps `updated_at` and still publishes.
 
 ## Deploying to a Linux host
 

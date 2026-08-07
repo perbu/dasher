@@ -46,7 +46,7 @@ func (g *GitHub) fetch(ctx context.Context) error {
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
-	resp, err := g.client.Do(req)
+	resp, err := do("github", g.client, req)
 	if err != nil {
 		return fmt.Errorf("request: %w", err)
 	}

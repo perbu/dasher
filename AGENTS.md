@@ -37,6 +37,13 @@ gofmt -w .                               # format (must be clean)
 - Fetched data goes into `internal/state.Store` (mutex-guarded); the
   publisher snapshots it. Keep payloads small; fields use `omitempty` until
   their first successful fetch.
+- The publisher polls the store every `pollInterval` and publishes when
+  `UpdatedAt` moves, so new data reaches the topic in about a second.
+  `publish.interval` is the heartbeat ceiling, not a fixed cadence — don't
+  reintroduce a plain `time.Ticker(p.interval)` loop.
+- Fetchers route HTTP through `do()` in `fetchers.go` rather than calling
+  `client.Do` directly; that is what produces the `-debug` request timings.
+  Set `fetchers.Verbose` before starting any fetcher, never after.
 - Match existing style: short doc comments on packages/exports, no test
   scaffolding unless asked.
 - Commit straight to `main` when asked to commit. This is a solo project with

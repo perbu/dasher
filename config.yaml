@@ -33,4 +33,6 @@ yr:
   interval: 15m
 
 publish:
+  # Payloads are published as soon as a fetch lands; this is the heartbeat
+  # ceiling, i.e. the longest the retained message goes without a refresh.
   interval: 30s

@@ -58,6 +58,9 @@ func main() {
 
 	store := &state.Store{}
 
+	// Must be set before any fetcher starts.
+	fetchers.Verbose = *debug
+
 	claude, err := fetchers.NewClaude(cfg.Claude, store)
 	if err != nil {
 		log.Fatalf("claude: %v", err)

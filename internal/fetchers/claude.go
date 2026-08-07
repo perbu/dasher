@@ -152,7 +152,7 @@ func (c *Claude) getUsage(ctx context.Context, token string) ([]byte, int, error
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
 	req.Header.Set("User-Agent", claudeUserAgent)
 
-	resp, err := c.client.Do(req)
+	resp, err := do("claude", c.client, req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("request: %w", err)
 	}
@@ -173,7 +173,20 @@ func (c *Claude) accessToken(ctx context.Context) (string, error) {
 	c.mu.Unlock()
 
 	if token != "" && time.Now().Before(expiry.Add(-refreshSkew)) {
+		if Verbose {
+			log.Printf("[claude] access token valid for another %s",
+				time.Until(expiry).Round(time.Second))
+		}
 		return token, nil
+	}
+	if Verbose {
+		switch {
+		case token == "":
+			log.Print("[claude] no access token cached, refreshing")
+		default:
+			log.Printf("[claude] access token expires %s, refreshing",
+				time.Until(expiry).Round(time.Second))
+		}
 	}
 	return c.refresh(ctx)
 }
@@ -200,7 +213,7 @@ func (c *Claude) refresh(ctx context.Context) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", claudeUserAgent)
 
-	resp, err := c.client.Do(req)
+	resp, err := do("claude", c.client, req)
 	if err != nil {
 		return "", fmt.Errorf("token request: %w", err)
 	}
@@ -244,6 +257,16 @@ func (c *Claude) refresh(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	c.creds = next
 	c.mu.Unlock()
+
+	// Logged unconditionally: this runs roughly every six hours, and a
+	// rotation is the moment any other holder of the old refresh token
+	// (Claude Code included) stops working.
+	rotated := ""
+	if next.RefreshToken != refreshToken {
+		rotated = "; refresh token rotated"
+	}
+	log.Printf("[claude] access token refreshed, valid %s (until %s)%s",
+		lifetime.Round(time.Second), next.ExpiresAt.Format(time.RFC3339), rotated)
 
 	if err := writeCredentials(c.cfg.TokenCache, next); err != nil {
 		// The in-memory token still works, but losing a rotated refresh token
