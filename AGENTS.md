@@ -39,6 +39,9 @@ gofmt -w .                               # format (must be clean)
   their first successful fetch.
 - Match existing style: short doc comments on packages/exports, no test
   scaffolding unless asked.
+- Commit straight to `main` when asked to commit. This is a solo project with
+  no review flow — do not create a feature branch or open a PR for it. Still
+  commit only when asked, and never push unless asked.
 
 ## Gotchas (learned the hard way)
 
