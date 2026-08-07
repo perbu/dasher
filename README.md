@@ -43,8 +43,11 @@ github:
   interval: 5m
 
 claude:
-  token: ${CLAUDE_TOKEN}       # Anthropic OAuth token
+  refresh_token: ${CLAUDE_REFRESH_TOKEN}
+  client_id: ${CLAUDE_CLIENT_ID}
+  token_url: https://console.anthropic.com/v1/oauth/token
   url: https://api.anthropic.com/api/oauth/usage
+  token_cache: claude-token.json
   interval: 5m
 
 yr:
@@ -58,24 +61,71 @@ publish:
 ```
 
 Durations use Go syntax (`30s`, `5m`, `1h`). Required values: `mqtt.tls_cert`,
-`mqtt.tls_key`, `mqtt.tls_client_ca`, `github.token`, `claude.token`,
-`yr.lat`, `yr.lon`, `yr.user_agent`.
+`mqtt.tls_key`, `mqtt.tls_client_ca`, `github.token`, `claude.client_id`,
+`claude.token_url`, `yr.lat`, `yr.lon`, `yr.user_agent`.
+
+`claude.refresh_token` is required only until the token cache exists; after the
+first rotation the cache is the authoritative copy.
 
 The `yr.user_agent` must identify the app with a contact address —
 MET Norway rejects placeholder User-Agents with `403`.
 
-## Getting a Claude token
+## Claude credentials
 
-The usage endpoint uses your Claude subscription's OAuth token (the same one
-Claude Code holds). If you're logged into Claude Code, extract it with:
+The usage endpoint authenticates with your Claude subscription's OAuth
+credentials — the same ones Claude Code holds. **Copy the refresh token, not
+the access token.** Access tokens expire within hours; a static one in `.env`
+returns `401` forever after that. dasher stores the refresh token and mints
+access tokens as it needs them.
+
+Where Claude Code keeps credentials depends on the platform:
 
 ```sh
-jq -r '.claudeAiOauth.accessToken' ~/.claude/.credentials.json
+# macOS — Keychain
+security find-generic-password -s "Claude Code-credentials" -w | jq -r '.claudeAiOauth.refreshToken'
+
+# Linux — plain file
+jq -r '.claudeAiOauth.refreshToken' ~/.claude/.credentials.json
 ```
 
-Put the result in `.env` as `CLAUDE_TOKEN=sk-ant-oat01-...`. Note the token
-has an expiry — when requests start failing with `401`, re-extract it.
-(Alternatively, `claude setup-token` prints a long-lived token.)
+Put that in `.env` as `CLAUDE_REFRESH_TOKEN=`. You also need Claude Code's
+public OAuth client id in `CLAUDE_CLIENT_ID=`. At the time of writing it is
+`9d1c250a-e61b-44d9-88ed-5944d1962f5e`; recover it from the CLI binary with:
+
+```sh
+strings "$(readlink -f "$(which claude)")" | grep -o 'CLIENT_ID:"[0-9a-f-]*"' | sort -u
+```
+
+Take `CLIENT_ID`, **not** `DESIGN_CLIENT_ID` — that is a different, also-valid
+client, so picking it fails late and unhelpfully with `invalid_grant` rather
+than "client not found". Don't try to guess by grepping for bare UUIDs; the
+binary contains many, and the right one is not the most frequent.
+
+### Refresh tokens rotate — give each machine its own login
+
+Confirmed by testing: the token endpoint **consumes the refresh token on every
+exchange** and issues a replacement. A grant therefore has exactly one valid
+holder at a time.
+
+**Do not copy one refresh token to a second machine.** The first process to
+refresh invalidates it for everyone else — including Claude Code itself, which
+logs out on the machine the token came from. Separate logins produce separate
+grants that coexist happily, so run `claude auth login` on each host instead.
+
+dasher writes each rotated credential to `claude.token_cache`
+(`claude-token.json`, mode `0600`, gitignored, written via temp-file rename)
+and prefers it over `claude.refresh_token` from then on. **Preserve that file
+across deploys** — losing it means re-authenticating, since the seed in `.env`
+is dead the moment the first rotation happens.
+
+### User-Agent
+
+Send an honest `User-Agent`. The OAuth token endpoint returns **404** to
+requests claiming to be `claude-code/<version>`, so impersonating the CLI
+breaks refresh; the usage endpoint serves any UA, so it gains nothing either.
+
+The token endpoint and client id come from Claude Code's private OAuth flow
+rather than a documented API — treat both as liable to change without notice.
 
 ## GitHub token
 
@@ -86,9 +136,17 @@ Fine-grained PATs do not work with the notifications endpoint. Put it in
 
 ## Run
 
+With secrets in `.env` (the usual case), just:
+
+```sh
+./dasher
+```
+
+Or pass them explicitly:
+
 ```sh
 export MQTT_TLS_CERT=cert.pem MQTT_TLS_KEY=key.pem MQTT_CLIENT_CA=certs/ca.crt \
-       GITHUB_TOKEN=ghp_... CLAUDE_TOKEN=sk-ant-oat01-...
+       GITHUB_TOKEN=ghp_... CLAUDE_CLIENT_ID=... CLAUDE_REFRESH_TOKEN=sk-ant-ort01-...
 ./dasher
 ```
 
@@ -100,6 +158,90 @@ all, so no certificates or `mqtt.tls_*` values are needed. Never run with
 ```sh
 ./dasher -debug
 ```
+
+## Deploying to a Linux host
+
+```sh
+GOOS=linux GOARCH=amd64 go build -o dasher .
+```
+
+Copy `dasher`, `config.yaml`, `.env` and the certs to the host. **Do not copy
+`claude-token.json`** — see below.
+
+### Authenticate on the host itself
+
+Refresh tokens rotate, so the credential cannot be shared with your laptop.
+Log in on the host to get a grant of its own:
+
+```sh
+claude auth login --claudeai   # prints a URL if there is no browser
+jq -r '.claudeAiOauth.refreshToken' ~/.claude/.credentials.json
+```
+
+Put that in the host's `.env` as `CLAUDE_REFRESH_TOKEN=`, alongside
+`CLAUDE_CLIENT_ID=`. On the first refresh dasher writes `claude-token.json`
+and stops consulting `.env` for the token.
+
+Copying the laptop's token instead "works" until the first refresh, then the
+two hosts start invalidating each other's credential at random — and log you
+out of Claude Code wherever the token came from.
+
+### Preserve the token cache across deploys
+
+`claude-token.json` holds the only live credential once the first rotation has
+happened. A deploy that wipes the working directory forces a fresh
+`claude auth login`. Keep it outside the deploy path and point at it:
+
+```yaml
+claude:
+  token_cache: /var/lib/dasher/claude-token.json
+```
+
+The file is written with mode `0600` via temp-file rename, so an interrupted
+run cannot truncate it. dasher only overwrites it on a successful exchange.
+
+### systemd
+
+```ini
+[Unit]
+Description=dasher dashboard aggregator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dasher
+WorkingDirectory=/opt/dasher
+EnvironmentFile=/etc/dasher/dasher.env
+ExecStart=/opt/dasher/dasher -config /etc/dasher/config.yaml
+Restart=on-failure
+RestartSec=10s
+StateDirectory=dasher          # /var/lib/dasher for the token cache
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`EnvironmentFile=` replaces `.env` (`chmod 600`, owned by root). Under
+`ProtectSystem=strict` the filesystem is read-only apart from
+`StateDirectory`, so `claude.token_cache` must live in `/var/lib/dasher` or
+refresh fails with a write error.
+
+### Checking it works
+
+```sh
+journalctl -u dasher -f
+```
+
+A healthy start logs three `fetcher started` lines and nothing else. Fetch
+errors are logged and retried on the next tick — they never take the service
+down, so watch the log rather than the exit code. Refresh happens five minutes
+before expiry, roughly every six hours; `token endpoint returned 400` there
+means the grant was invalidated elsewhere and the host needs a fresh login.
 
 ## MQTT auth model
 
@@ -134,7 +276,12 @@ Published to `dashboard/data` with `retain=true`, QoS 1:
 {
   "updated_at": "2026-08-05T17:54:25Z",
   "github": { "unread_notifications": 3 },
-  "claude": { "...": "opaque usage JSON from the Anthropic API" },
+  "claude": {
+    "five_hour_pct": 3,
+    "five_hour_resets_at": "2026-08-07T22:30:00Z",
+    "seven_day_pct": 48,
+    "seven_day_resets_at": "2026-08-09T15:00:00Z"
+  },
   "weather": [
     { "time": "2026-08-05T18:00:00Z", "temperature_c": 17.6, "precipitation_mm": 0.9, "symbol": "rain" }
   ]
@@ -142,15 +289,25 @@ Published to `dashboard/data` with `retain=true`, QoS 1:
 ```
 
 `github`, `claude` and `weather` are omitted until the first successful
-fetch of each source. The Claude document is passed through unmodified, so
-the schema follows whatever the configured usage endpoint returns.
+fetch of each source.
+
+The usage endpoint returns roughly 1.8 KB — per-model breakdowns, spend, and
+a number of unreleased feature flags. Only the four fields above are published
+(128 bytes), to keep the ESP32's parse cheap. Dollar figures are deliberately
+excluded: they are null on Team plans, so utilization is the only measure that
+works across subscription types. If the endpoint renames its reset-time fields
+the fetcher logs an error rather than publishing a misleading `0`.
 
 ## Notes
 
 - The broker library is `github.com/mochi-mqtt/server/v2` — the renamed,
   maintained continuation of `mochi-co/mqtt/v2` (same project, v2.7.x).
-- The Claude fetcher targets the OAuth usage endpoint by default; adjust
-  `claude.url` if your token type targets a different endpoint.
+- The Claude usage and token endpoints are part of Claude Code's private OAuth
+  flow, not a documented public API. They work, but nothing guarantees they
+  keep working; a schema change surfaces as a logged fetch error, never a
+  crash.
+- `claude setup-token` is **not** a shortcut here. The long-lived token it
+  mints is scoped for inference and gets `403` from the usage endpoint.
 
 ## Layout
 

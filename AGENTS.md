@@ -50,7 +50,23 @@ gofmt -w .                               # format (must be clean)
   50, so the unread count saturates at 50.
 - MET Norway (Yr.no) 403s placeholder User-Agents. `yr.user_agent` must
   contain a real contact, e.g. `dasher/per.buer@gmail.com <location>`.
-- The Claude document is passed through as opaque `json.RawMessage`; the
-  usage endpoint's schema is not a stable contract, so don't model it.
+- The Claude usage endpoint returns ~1.8KB; only the four fields the display
+  needs are projected into `state.ClaudeData` (~128 bytes). Model no more than
+  that — the rest of the schema is not a stable contract. Use `utilization`,
+  not the dollar fields, which are null on Team plans.
+- Claude OAuth **access** tokens expire within hours — a static one in `.env`
+  yields a permanent `401`. The fetcher holds a **refresh** token and mints
+  access tokens itself, persisting rotated credentials to `claude.token_cache`.
+  That cache outranks `claude.refresh_token` once written; don't "fix" a stale
+  login by editing `.env` alone.
+- Refresh tokens **rotate**: each exchange consumes the old one. A grant has a
+  single valid holder, so never share one between machines (or with Claude Code
+  itself) — it logs the other holder out. One `claude auth login` per host.
+- Use an honest `User-Agent`. The token endpoint 404s on `claude-code/<ver>`;
+  the usage endpoint accepts anything. `claudeUserAgent` in `claude.go`.
+- Claude Code's OAuth constants live in the CLI bundle as `CLIENT_ID` (the one
+  you want) and `DESIGN_CLIENT_ID`. Both are valid clients, so a wrong pick
+  fails late with `invalid_grant` rather than "client not found" — grep the
+  binary for `CLIENT_ID:"` rather than guessing from a bare UUID list.
 - Verify changes by running the service against a self-signed cert and a
   real MQTT client, not just by compiling.

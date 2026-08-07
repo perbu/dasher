@@ -58,10 +58,15 @@ func main() {
 
 	store := &state.Store{}
 
+	claude, err := fetchers.NewClaude(cfg.Claude, store)
+	if err != nil {
+		log.Fatalf("claude: %v", err)
+	}
+
 	var wg sync.WaitGroup
 	for name, run := range map[string]func(context.Context){
 		"github": fetchers.NewGitHub(cfg.GitHub, store).Run,
-		"claude": fetchers.NewClaude(cfg.Claude, store).Run,
+		"claude": claude.Run,
 		"yr":     fetchers.NewYr(cfg.Yr, store).Run,
 	} {
 		wg.Add(1)

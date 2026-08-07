@@ -33,11 +33,16 @@ type GitHubConfig struct {
 	Interval time.Duration
 }
 
-// ClaudeConfig configures the Claude usage fetcher.
+// ClaudeConfig configures the Claude usage fetcher. Access tokens are
+// short-lived, so the fetcher authenticates with a refresh token and mints
+// access tokens as it needs them.
 type ClaudeConfig struct {
-	Token    string
-	URL      string
-	Interval time.Duration
+	RefreshToken string
+	ClientID     string
+	TokenURL     string
+	TokenCache   string
+	URL          string
+	Interval     time.Duration
 }
 
 // YrConfig configures the Yr.no (MET Norway) weather fetcher.
@@ -84,9 +89,12 @@ type fileConfig struct {
 		Interval duration `yaml:"interval"`
 	} `yaml:"github"`
 	Claude struct {
-		Token    string   `yaml:"token"`
-		URL      string   `yaml:"url"`
-		Interval duration `yaml:"interval"`
+		RefreshToken string   `yaml:"refresh_token"`
+		ClientID     string   `yaml:"client_id"`
+		TokenURL     string   `yaml:"token_url"`
+		TokenCache   string   `yaml:"token_cache"`
+		URL          string   `yaml:"url"`
+		Interval     duration `yaml:"interval"`
 	} `yaml:"claude"`
 	Yr struct {
 		Lat       *float64 `yaml:"lat"`
@@ -114,6 +122,7 @@ func Load(path string, requireTLS bool) (*Config, error) {
 	fc.MQTT.Topic = "dashboard/data"
 	fc.GitHub.Interval = duration(5 * time.Minute)
 	fc.Claude.URL = "https://api.anthropic.com/api/oauth/usage"
+	fc.Claude.TokenCache = "claude-token.json"
 	fc.Claude.Interval = duration(5 * time.Minute)
 	fc.Yr.Interval = duration(15 * time.Minute)
 	fc.Publish.Interval = duration(30 * time.Second)
@@ -135,9 +144,12 @@ func Load(path string, requireTLS bool) (*Config, error) {
 			Interval: time.Duration(fc.GitHub.Interval),
 		},
 		Claude: ClaudeConfig{
-			Token:    fc.Claude.Token,
-			URL:      fc.Claude.URL,
-			Interval: time.Duration(fc.Claude.Interval),
+			RefreshToken: fc.Claude.RefreshToken,
+			ClientID:     fc.Claude.ClientID,
+			TokenURL:     fc.Claude.TokenURL,
+			TokenCache:   fc.Claude.TokenCache,
+			URL:          fc.Claude.URL,
+			Interval:     time.Duration(fc.Claude.Interval),
 		},
 		Yr: YrConfig{
 			UserAgent: fc.Yr.UserAgent,
@@ -155,10 +167,14 @@ func Load(path string, requireTLS bool) (*Config, error) {
 	}
 
 	var missing []string
+	// claude.refresh_token is not required here: once the fetcher has rotated
+	// it, the token cache is the authoritative copy and the config seed may be
+	// dropped. NewClaude reports the case where neither source has one.
 	required := map[string]string{
-		"github.token":  cfg.GitHub.Token,
-		"claude.token":  cfg.Claude.Token,
-		"yr.user_agent": cfg.Yr.UserAgent,
+		"github.token":     cfg.GitHub.Token,
+		"claude.client_id": cfg.Claude.ClientID,
+		"claude.token_url": cfg.Claude.TokenURL,
+		"yr.user_agent":    cfg.Yr.UserAgent,
 	}
 	if requireTLS {
 		required["mqtt.tls_cert"] = cfg.MQTT.TLSCert

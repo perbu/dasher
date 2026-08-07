@@ -13,8 +13,16 @@ github:
   interval: 5m
 
 claude:
-  token: ${CLAUDE_TOKEN}
+  # Access tokens expire within hours, so dasher authenticates with a refresh
+  # token and mints access tokens itself. Seed refresh_token from Claude Code's
+  # stored credentials (see README).
+  refresh_token: ${CLAUDE_REFRESH_TOKEN}
+  client_id: ${CLAUDE_CLIENT_ID}   # Claude Code's public OAuth client id
+  token_url: https://console.anthropic.com/v1/oauth/token
   url: https://api.anthropic.com/api/oauth/usage
+  # Refreshed credentials land here (0600). The endpoint may rotate the refresh
+  # token, so once written this file outranks refresh_token above.
+  token_cache: claude-token.json
   interval: 5m
 
 yr:

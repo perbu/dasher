@@ -2,7 +2,6 @@
 package state
 
 import (
-	"encoding/json"
 	"sync"
 	"time"
 )
@@ -17,10 +16,20 @@ type HourForecast struct {
 
 // Payload is the JSON document published to the MQTT topic.
 type Payload struct {
-	UpdatedAt time.Time       `json:"updated_at"`
-	GitHub    *GitHubData     `json:"github,omitempty"`
-	Claude    json.RawMessage `json:"claude,omitempty"`
-	Weather   []HourForecast  `json:"weather,omitempty"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	GitHub    *GitHubData    `json:"github,omitempty"`
+	Claude    *ClaudeData    `json:"claude,omitempty"`
+	Weather   []HourForecast `json:"weather,omitempty"`
+}
+
+// ClaudeData holds the Claude usage metrics the dashboard renders. The usage
+// endpoint returns a far larger document; only these fields are published, to
+// keep the payload small enough for the ESP32.
+type ClaudeData struct {
+	FiveHourPct      float64   `json:"five_hour_pct"`
+	FiveHourResetsAt time.Time `json:"five_hour_resets_at"`
+	SevenDayPct      float64   `json:"seven_day_pct"`
+	SevenDayResetsAt time.Time `json:"seven_day_resets_at"`
 }
 
 // Notification describes a single unread GitHub notification.
@@ -51,11 +60,11 @@ func (s *Store) SetGitHub(d GitHubData) {
 	s.payload.UpdatedAt = time.Now().UTC()
 }
 
-// SetClaude records the latest Claude usage document (opaque JSON).
-func (s *Store) SetClaude(d json.RawMessage) {
+// SetClaude records the latest Claude usage metrics.
+func (s *Store) SetClaude(d ClaudeData) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.payload.Claude = d
+	s.payload.Claude = &d
 	s.payload.UpdatedAt = time.Now().UTC()
 }
 
