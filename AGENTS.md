@@ -11,6 +11,19 @@ ACL on the data topic) for an ESP32 dashboard. Publishing is internal-only
 via the broker's inline client. No tests exist yet; verification is done by
 building and running the binary.
 
+`firmware/` is the other half: a PlatformIO/Arduino project for the
+Wireless-Tag **WT32-SC01 Plus** (ESP32-S3, 16MB flash, 2MB PSRAM, 480x320
+ST7796UI on an 8-bit parallel bus, FT6336U touch) that subscribes to the topic
+and renders the payload. It draws with LovyanGFX directly — there is no LVGL,
+and adding it would be a significant change of direction rather than a
+refactor.
+
+The **Plus** matters: the plain WT32-SC01 is an ESP32-WROVER-B with the panel
+on SPI. Documentation and example configs for the two are freely mixed up
+online, including in search results that name one and describe the other.
+Verify against the hardware (`esptool.py chip_id`, USB VID `303A:1001` for the
+Plus) rather than trusting a page that merely has the right board name on it.
+
 ## Commands
 
 ```sh
@@ -21,6 +34,15 @@ gofmt -w .                               # format (must be clean)
 ./dasher                                 # run (needs config.yaml + secrets)
 ./dasher -debug                          # dev: payloads to stdout, MQTT broker disabled (no TLS/certs needed)
 ./dasher -config other.yaml -env prod.env     # override paths
+```
+
+Firmware (needs `pio`; see README for the config.h / certs.h prerequisites):
+
+```sh
+scripts/gen-firmware-certs.sh esp32      # regenerate firmware/src/certs.h from certs/
+pio run -d firmware                      # build
+pio run -d firmware -t upload            # flash over USB-C
+pio device monitor -b 115200             # serial log
 ```
 
 ## Conventions
@@ -80,3 +102,38 @@ gofmt -w .                               # format (must be clean)
   binary for `CLIENT_ID:"` rather than guessing from a bare UUID list.
 - Verify changes by running the service against a self-signed cert and a
   real MQTT client, not just by compiling.
+
+### Firmware
+
+- The broker's own certificate is issued by the same CA as the client certs
+  (`scripts/mqtt-client-ca.sh server <host>`). Its subjectAltName must match
+  `MQTT_HOST` in `firmware/include/config.h` — mbedTLS verifies the name, and
+  a mismatch fails as a bare "certificate verify failed".
+- TLS checks certificate validity against the clock, and the ESP32 boots at
+  the epoch. `net.cpp` syncs SNTP before it will attempt MQTT; do not reorder
+  that.
+- PubSubClient drops messages larger than its buffer **silently** — no error,
+  no callback. The buffer is 16KB because the notification list can push the
+  payload to several KB; shrink it and busy inboxes stop rendering.
+- `firmware/include/config.h` (wifi credentials) and `firmware/src/certs.h`
+  (device private key) are generated and git-ignored. Never commit either,
+  and never inline a fallback default for them.
+- The frame is composed in a PSRAM sprite and pushed once. Drawing straight
+  to the panel per widget would tear; keep `ui.cpp` rendering into the
+  `LGFXBase&` it is handed.
+- Layout constants live in `theme.h`, not scattered through `ui.cpp`.
+- `Serial` only works with `-DARDUINO_USB_CDC_ON_BOOT=1` (native USB, no UART
+  bridge). Dropping that flag makes a healthy board look bricked.
+- `pio device monitor` needs a TTY; read `/dev/cu.usbmodem*` with pyserial
+  when scripting, and set `dtr = True` — the USB-CDC stack discards output
+  while the host looks disconnected, so a silent port usually means a missing
+  DTR rather than a crashed board. PlatformIO's own python has pyserial
+  (`/opt/homebrew/Cellar/platformio/*/libexec/bin/python`); the system one
+  does not.
+- Only `kMaxNotifications` entries are kept from the payload, but every entry
+  is still scanned to count distinct repos. Do not "optimise" the loop by
+  breaking out early once the array is full.
+- The board's flash is 16MB with `default_16MB.csv`; the stock
+  `esp32-s3-devkitc-1` definition assumes 8MB and octal PSRAM, so
+  `board_upload.flash_size` and `board_build.arduino.memory_type=qio_qspi`
+  are both load-bearing.

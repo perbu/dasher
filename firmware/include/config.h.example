@@ -1,0 +1,30 @@
+// Copy to config.h and fill in. config.h is git-ignored.
+#pragma once
+
+#define WIFI_SSID "my-network"
+#define WIFI_PASS "my-password"
+
+// Must match a subjectAltName in the broker's server certificate — mbedTLS
+// verifies the name, so an IP here needs an IP: SAN, a hostname a DNS: one.
+// scripts/mqtt-client-ca.sh server <this value> gets it right.
+//
+// A .local name resolves over mDNS without any extra library: lwIP is built
+// with CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES, so the resolver multicasts those
+// rather than asking the DNS server. It does need something answering on the
+// host — Bonjour on macOS, avahi-daemon on Linux.
+#define MQTT_HOST "sponge.local"
+#define MQTT_PORT 8883
+#define MQTT_TOPIC "dashboard/data"
+#define MQTT_CLIENT_ID "dasher-esp32"
+
+// POSIX TZ string. Used for the hour labels and reset times on screen;
+// the payload itself is UTC.
+#define TZ_SPEC "CET-1CEST,M3.5.0,M10.5.0/3"
+
+// TLS certificates expire, so the clock must be right before the handshake.
+#define NTP_SERVER_1 "pool.ntp.org"
+#define NTP_SERVER_2 "time.cloudflare.com"
+
+// Backlight levels, toggled by tapping the screen.
+#define BRIGHTNESS_FULL 255
+#define BRIGHTNESS_DIM 20

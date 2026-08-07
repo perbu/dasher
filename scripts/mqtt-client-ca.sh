@@ -2,11 +2,16 @@
 # Manages the private CA that signs MQTT subscriber client certificates.
 #
 # Usage:
-#   scripts/mqtt-client-ca.sh init            create certs/ca.key + certs/ca.crt (10-year CA)
+#   scripts/mqtt-client-ca.sh init             create certs/ca.key + certs/ca.crt (10-year CA)
 #   scripts/mqtt-client-ca.sh issue <name>     issue a client cert/key for <name>, signed by the CA
+#   scripts/mqtt-client-ca.sh server <host>    issue the broker's own cert for <host-or-ip>
 #
 # Point mqtt.tls_client_ca (config.yaml) at certs/ca.crt. Give each
 # subscribing device (e.g. the ESP32) its own certs/<name>.crt + <name>.key.
+#
+# The broker's cert comes from the same CA so the device has exactly one thing
+# to trust. Its subjectAltName must match the address the device dials —
+# mbedTLS on the ESP32 verifies the name and drops the connection otherwise.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -54,8 +59,39 @@ case "$cmd" in
     echo "wrote $key (load onto the $name device) and $crt (matching client cert)"
     ;;
 
+  server)
+    host="${2:?usage: $0 server <hostname-or-ip>}"
+    key="$CERT_DIR/server.key"
+    csr="$CERT_DIR/server.csr"
+    crt="$CERT_DIR/server.crt"
+    if [[ ! -f "$CA_KEY" || ! -f "$CA_CRT" ]]; then
+      echo "no CA found; run '$0 init' first" >&2
+      exit 1
+    fi
+    if [[ -f "$key" || -f "$crt" ]]; then
+      echo "refusing to overwrite existing $key / $crt" >&2
+      exit 1
+    fi
+    # An IP address needs an IP: SAN; a hostname a DNS: one. Getting this
+    # wrong fails at the handshake with a bare "certificate verify failed".
+    if [[ "$host" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+      san="IP:$host"
+    else
+      san="DNS:$host"
+    fi
+    openssl req -newkey rsa:2048 -sha256 -nodes \
+      -keyout "$key" -out "$csr" -subj "/CN=$host"
+    openssl x509 -req -in "$csr" -CA "$CA_CRT" -CAkey "$CA_KEY" -CAcreateserial \
+      -out "$crt" -days "$CLIENT_DAYS" -sha256 \
+      -extfile <(printf 'subjectAltName=%s\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n' "$san")
+    rm -f "$csr" "$CERT_DIR/ca.srl"
+    chmod 600 "$key"
+    echo "wrote $key and $crt for $san"
+    echo "set MQTT_TLS_CERT=$crt and MQTT_TLS_KEY=$key in .env"
+    ;;
+
   *)
-    echo "usage: $0 {init|issue <name>}" >&2
+    echo "usage: $0 {init|issue <name>|server <hostname-or-ip>}" >&2
     exit 1
     ;;
 esac

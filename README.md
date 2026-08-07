@@ -281,20 +281,29 @@ present a certificate signed by `mqtt.tls_client_ca` — and the ACL
 restricts every connection to read-only on `dashboard/data`; everything
 else (publish, any other topic) is explicitly denied.
 
-Manage the client CA and issue device certs with:
+Manage the CA, the broker's own certificate and the device certs with:
 
 ```sh
-scripts/mqtt-client-ca.sh init          # once: creates certs/ca.key + certs/ca.crt
-scripts/mqtt-client-ca.sh issue esp32   # per device: certs/esp32.key + certs/esp32.crt
+scripts/mqtt-client-ca.sh init                 # once: creates certs/ca.key + certs/ca.crt
+scripts/mqtt-client-ca.sh server sponge.local  # broker cert: certs/server.key + certs/server.crt
+scripts/mqtt-client-ca.sh issue esp32          # per device: certs/esp32.key + certs/esp32.crt
 ```
 
-`certs/ca.crt` is what `mqtt.tls_client_ca` points at. Everything under
-`certs/` is git-ignored — `ca.key` in particular must stay private, since
-anyone holding it can mint a valid subscriber cert.
+`certs/ca.crt` is what `mqtt.tls_client_ca` points at, and `certs/server.*`
+what `MQTT_TLS_CERT`/`MQTT_TLS_KEY` point at. Everything under `certs/` is
+git-ignored — `ca.key` in particular must stay private, since anyone holding
+it can mint a valid subscriber cert.
 
-ESP32 client: connect with mTLS on port 8883 (server cert + `certs/esp32.crt`/
-`certs/esp32.key`), subscribe to `dashboard/data`; the retained message
-arrives immediately on subscribe.
+Signing the broker's certificate with the same CA is deliberate: the ESP32
+then has exactly one certificate to trust. The argument to `server` must be
+the address the device dials, because it becomes the certificate's
+`subjectAltName` and mbedTLS on the ESP32 verifies it. An IP gets an `IP:`
+SAN, a hostname a `DNS:` one; a mismatch fails the handshake with nothing
+more helpful than "certificate verify failed".
+
+ESP32 client: connect with mTLS on port 8883 (trusting `certs/ca.crt`,
+presenting `certs/esp32.crt`/`certs/esp32.key`), subscribe to
+`dashboard/data`; the retained message arrives immediately on subscribe.
 
 ## Payload
 
@@ -303,7 +312,12 @@ Published to `dashboard/data` with `retain=true`, QoS 1:
 ```json
 {
   "updated_at": "2026-08-05T17:54:25Z",
-  "github": { "unread_notifications": 3 },
+  "github": {
+    "unread_notifications": 3,
+    "notifications": [
+      { "type": "PullRequest", "repo": "perbu/dasher", "reason": "mention", "updated_at": "2026-08-05T17:41:02Z" }
+    ]
+  },
   "claude": {
     "five_hour_pct": 3,
     "five_hour_resets_at": "2026-08-07T22:30:00Z",
@@ -326,6 +340,105 @@ excluded: they are null on Team plans, so utilization is the only measure that
 works across subscription types. If the endpoint renames its reset-time fields
 the fetcher logs an error rather than publishing a misleading `0`.
 
+## ESP32 dashboard firmware
+
+`firmware/` is a PlatformIO project for the Wireless-Tag **WT32-SC01 Plus**:
+ESP32-S3, 16 MB flash, 2 MB QSPI PSRAM, 480×320 ST7796UI on an 8-bit parallel
+(i8080) bus, FT6336U capacitive touch on I²C.
+
+**Not the plain WT32-SC01.** That board is an ESP32-WROVER-B with the same
+panel on SPI — a different instruction set and a different display bus, so
+neither the binary nor `display.h` transfers. Tell them apart by USB vendor
+ID: the Plus enumerates as `303A:1001` (the S3's native USB-Serial/JTAG),
+while the original appears as a CP2102 or CH340 UART bridge. `esptool.py
+chip_id` settles it.
+
+It subscribes to `dashboard/data` over mutual TLS and draws a single fixed
+screen — two Claude ring gauges with their reset times, the GitHub unread
+count and how many repositories it spans, six hours of forecast, and a
+footer carrying the payload's age and link state.
+
+Touch has two gestures and no navigation beyond them. A **short tap** opens
+a full-screen detail view: the newest notifications with their repo and
+reason, exact reset dates with one decimal of utilisation, and every
+forecast hour with its `symbol_code` spelled out, so an ambiguous icon can
+always be resolved by reading it. Tap again to close, or let it fall back on
+its own after 45 seconds. A **long press** (700 ms) toggles the backlight
+between full and dim; it fires while your finger is still down, so the
+screen tells you when you have held it long enough.
+
+Drawing is LovyanGFX directly — no LVGL. The whole frame is composed in a
+480×320 sprite in PSRAM and pushed in one operation, so the panel never
+shows a half-drawn update. Weather icons are drawn as vectors from the
+met.no `symbol_code`, which costs no flash and needs no asset pipeline.
+
+### Build and flash
+
+```sh
+cp firmware/include/config.h.example firmware/include/config.h
+$EDITOR firmware/include/config.h        # wifi credentials, broker host, timezone
+scripts/gen-firmware-certs.sh esp32      # bakes certs/ca.crt + certs/esp32.* into the build
+pio run -d firmware -t upload
+pio device monitor -b 115200
+```
+
+Both generated files hold secrets — WiFi credentials in `config.h`, the
+device's private key in `src/certs.h` — and both are git-ignored. Rerun
+`gen-firmware-certs.sh` after reissuing a device cert; the header is a copy,
+not a reference.
+
+`MQTT_HOST` in `config.h` must match the SAN in the broker's certificate
+exactly. Connecting to `192.168.50.2` while the cert says `DNS:sponge.local`
+fails the handshake even though both name the same machine.
+
+### Finding the broker: mDNS
+
+A `.local` hostname works with no extra library and nothing to initialise.
+lwIP is built with `CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES`, so
+`dns_gethostbyname` multicasts names with that suffix instead of asking the
+configured DNS server — and that is the path `WiFiClientSecure::connect`
+already takes. The `ESPmDNS` library in the Arduino framework is for
+*advertising* a name, which the display has no reason to do.
+
+What it does depend on is a responder on the broker's host: Bonjour handles
+this automatically on macOS, while a Linux VM needs `avahi-daemon`. If the
+host cannot answer mDNS, use its IP address in both `MQTT_HOST` and the
+`server` subcommand — the SAN becomes `IP:` instead of `DNS:` and everything
+else is unchanged, at the cost of breaking whenever DHCP moves the host.
+
+### What to expect on the panel
+
+Until the first payload lands the screen shows the boot sequence — wifi,
+clock, broker — which is also where a failure parks itself. After that the
+footer is the health indicator: `updated 12s ago` alongside `mqtt ok` is a
+working system. The age comes from the payload's own `updated_at`, so a
+stalled fetcher on the server side turns the footer amber even while the
+MQTT link stays up. Since `publish.interval` bounds the heartbeat at 30s,
+anything past 90s is genuinely stale.
+
+### Gotchas worth knowing
+
+- **The clock must be right before the handshake.** The ESP32 boots at the
+  epoch, and certificate validity is checked against it, so the firmware
+  syncs SNTP before connecting and will not attempt MQTT until it has.
+- **PubSubClient's default 256-byte buffer silently drops larger messages.**
+  The notification list can push the payload to several KB, so the buffer is
+  set to 16 KB. Messages that exceed it do not error — they simply never
+  arrive.
+- The panel is 320×480 natively; `setRotation(1)` gives the landscape the
+  layout assumes.
+- The parallel bus runs at 20 MHz through the S3's LCD_CAM peripheral. There
+  is headroom above that if full-frame pushes ever feel slow.
+- **Serial needs `ARDUINO_USB_CDC_ON_BOOT=1`.** Output goes over the S3's
+  native USB, not a UART bridge; without that flag `Serial.print` writes into
+  the void and the board looks dead when it is running fine.
+- `pio device monitor` requires an interactive terminal. To read the log from
+  a script, use pyserial directly — **and assert DTR**. The USB-CDC stack
+  throws output away while the host looks disconnected, so a silent port is
+  far more likely to be a missing `dtr = True` than a hung board.
+- RS/DC is GPIO0, which is also a strapping pin. That is how the board is
+  wired and not a mistake to "fix".
+
 ## Notes
 
 - The broker library is `github.com/mochi-mqtt/server/v2` — the renamed,
@@ -347,4 +460,11 @@ internal/broker/         embedded MQTT broker (mTLS + ACL)
 internal/state/          shared aggregated payload
 internal/fetchers/       github / claude / yr background tickers
 internal/publisher/      periodic retained publish to the topic
+scripts/                 CA management, firmware cert generation
+firmware/                PlatformIO project for the WT32-SC01 display
+firmware/src/display.h   LovyanGFX panel/touch definition for the board
+firmware/src/dashboard.* payload parsing
+firmware/src/ui.*        the dashboard layout
+firmware/src/icons.*     vector weather glyphs
+firmware/src/net.*       wifi, clock sync, mTLS MQTT subscription
 ```
