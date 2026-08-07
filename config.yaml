@@ -1,0 +1,28 @@
+# dasher configuration.
+# Secrets may reference environment variables with ${VAR} syntax.
+
+mqtt:
+  listen_addr: ":8883"
+  tls_cert: ${MQTT_TLS_CERT}         # server certificate
+  tls_key: ${MQTT_TLS_KEY}           # server private key
+  tls_client_ca: ${MQTT_CLIENT_CA}   # CA that signs subscriber client certs
+  topic: dashboard/data
+
+github:
+  token: ${GITHUB_TOKEN}  # classic PAT, notifications scope (fine-grained PATs don't work)
+  interval: 5m
+
+claude:
+  token: ${CLAUDE_TOKEN}
+  url: https://api.anthropic.com/api/oauth/usage
+  interval: 5m
+
+yr:
+  # Norge/Oslo/Oslo/Nydalsdammen (approx. 59.9497 N, 10.7665 E)
+  lat: 59.9497
+  lon: 10.7665
+  user_agent: "dasher/per.buer@gmail.com Norge/Oslo/Oslo/Nydalsdammen"
+  interval: 15m
+
+publish:
+  interval: 30s
