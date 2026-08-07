@@ -30,10 +30,21 @@ func New(srv *mqtt.Server, store *state.Store, topic string, interval time.Durat
 	return &Publisher{srv: srv, store: store, topic: topic, interval: interval, debug: debug}
 }
 
-// Run publishes immediately and then on every tick until ctx is cancelled.
+// warmupInterval is how often Run retries before the first fetch lands.
+const warmupInterval = 250 * time.Millisecond
+
+// Run publishes as soon as the first data is available and then on every
+// tick until ctx is cancelled.
 func (p *Publisher) Run(ctx context.Context) {
-	p.publish()
-	t := time.NewTicker(p.interval)
+	// No fetcher has finished when Run starts, so the first publish finds an
+	// empty snapshot and skips. Poll on a short interval until one lands:
+	// ticking straight at p.interval would leave the retained topic (and, in
+	// debug mode, stdout) empty for a full cycle after every restart.
+	interval := warmupInterval
+	if p.publish() {
+		interval = p.interval
+	}
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {
@@ -41,20 +52,27 @@ func (p *Publisher) Run(ctx context.Context) {
 			p.publish() // final retained update on shutdown
 			return
 		case <-t.C:
-			p.publish()
+			if p.publish() && interval == warmupInterval {
+				interval = p.interval
+				t.Reset(interval)
+			}
 		}
 	}
 }
 
-func (p *Publisher) publish() {
+// publish sends the current snapshot to the topic, and to stdout in debug
+// mode. It reports whether any data has been fetched yet; false means the
+// snapshot was still empty and nothing was sent.
+func (p *Publisher) publish() bool {
 	snapshot := p.store.Snapshot()
 	if snapshot.UpdatedAt.IsZero() {
-		return // nothing fetched yet; don't publish an empty document
+		return false // nothing fetched yet; don't publish an empty document
 	}
 	payload, err := json.Marshal(snapshot)
 	if err != nil {
+		// Data exists, so this is a real failure rather than warming up.
 		log.Printf("[publisher] marshal error: %v", err)
-		return
+		return true
 	}
 	if p.debug {
 		var pretty bytes.Buffer
@@ -65,9 +83,10 @@ func (p *Publisher) publish() {
 		}
 	}
 	if p.srv == nil {
-		return // debug mode: no broker running
+		return true // debug mode: no broker running
 	}
 	if err := p.srv.Publish(p.topic, payload, true, 1); err != nil {
 		log.Printf("[publisher] publish error: %v", err)
 	}
+	return true
 }
