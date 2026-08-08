@@ -43,6 +43,7 @@ bool dashboard_parse(const char *json, size_t len, Dashboard &out) {
 	filter["github"]["notifications"][0]["repo"] = true;
 	filter["github"]["notifications"][0]["reason"] = true;
 	filter["github"]["notifications"][0]["type"] = true;
+	filter["github"]["notifications"][0]["updated_at"] = true;
 	filter["claude"] = true;
 	filter["weather"][0]["time"] = true;
 	filter["weather"][0]["temperature_c"] = true;
@@ -82,6 +83,7 @@ bool dashboard_parse(const char *json, size_t len, Dashboard &out) {
 				snprintf(e.repo, sizeof(e.repo), "%s", repo);
 				snprintf(e.reason, sizeof(e.reason), "%s", n["reason"] | "");
 				snprintf(e.type, sizeof(e.type), "%s", n["type"] | "");
+				e.updated_at = parse_rfc3339(n["updated_at"] | (const char *)nullptr);
 			}
 			bool dup = false;
 			for (int i = 0; i < nseen; i++) {

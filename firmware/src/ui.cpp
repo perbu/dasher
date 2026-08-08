@@ -191,154 +191,97 @@ void ui_render(lgfx::LGFXBase &g, const Dashboard &d) {
 	render_weather(g, d);
 }
 
-// "Fri 8 Aug 22:30" — the dashboard gauges only have room for the time, and
-// the whole point of the detail view is not having to guess the day.
-static void format_reset_full(time_t t, char *buf, size_t n) {
+// "4m", "3h", "2d" — enough to tell a fresh notification from one that has
+// been sitting there for days, without spending width on a full timestamp.
+static void format_age(time_t t, time_t now, char *buf, size_t n) {
 	if (t == 0) {
-		snprintf(buf, n, "unknown");
+		buf[0] = '\0';
 		return;
 	}
-	struct tm lt;
-	localtime_r(&t, &lt);
-	strftime(buf, n, "%a %e %b %H:%M", &lt);
-}
-
-// met.no codes carry a "_day"/"_night" suffix that says nothing the icon has
-// not already said. Drop it so the name fits the column.
-static void symbol_label(const char *code, char *buf, size_t n) {
-	snprintf(buf, n, "%s", code == nullptr ? "" : code);
-	char *u = strrchr(buf, '_');
-	if (u != nullptr && (strcmp(u, "_day") == 0 || strcmp(u, "_night") == 0 || strcmp(u, "_polartwilight") == 0)) {
-		*u = '\0';
+	long age = (long)(now - t);
+	if (age < 0) {
+		age = 0;
+	}
+	if (age < 3600) {
+		snprintf(buf, n, "%ldm", age / 60);
+	} else if (age < 86400) {
+		snprintf(buf, n, "%ldh", age / 3600);
+	} else {
+		snprintf(buf, n, "%ldd", age / 86400);
 	}
 }
 
+// Full-screen GitHub detail: the list behind the count on the dashboard.
+//
+// Weather and Claude are deliberately absent. The dashboard already shows
+// everything the payload carries about them, so a detail view could only
+// restate it — whereas the notifications are genuinely unseen, since the
+// dashboard has room for a number and nothing else.
 void ui_render_detail(lgfx::LGFXBase &g, const Dashboard &d) {
-	g.fillScreen(kBg);
+	const time_t now = time(nullptr);
+	char buf[64];
 
+	g.fillScreen(kBg);
 	g.setFont(&fonts::DejaVu18);
 	g.setTextColor(kText, kBg);
 	g.setTextDatum(textdatum_t::middle_left);
-	g.drawString("details", 16, 15);
+	g.drawString("github", 16, 16);
 	g.setFont(&fonts::DejaVu12);
 	g.setTextColor(kDim, kBg);
 	g.setTextDatum(textdatum_t::middle_right);
-	g.drawString("tap to close", kScreenW - 16, 15);
-	g.drawFastHLine(8, 29, kScreenW - 16, kStroke);
+	g.drawString("tap to close", kScreenW - 16, 16);
+	g.drawFastHLine(8, 31, kScreenW - 16, kStroke);
 
-	char buf[64];
-
-	// Left: the notification list, which the dashboard can only count.
-	const int lx = 8, ly = 36, lw = 238, lh = 276;
-	card(g, lx, ly, lw, lh);
-	label(g, "GITHUB", lx + 16, ly + 18, kCard);
 	g.setTextDatum(textdatum_t::middle_left);
 	if (!d.have_github) {
-		g.setFont(&fonts::DejaVu12);
-		g.setTextColor(kDim, kCard);
-		g.drawString("no data yet", lx + 16, ly + 44);
-	} else if (d.unread == 0) {
-		g.setFont(&fonts::DejaVu12);
-		g.setTextColor(kGreen, kCard);
-		g.drawString("inbox clear", lx + 16, ly + 44);
+		g.setFont(&fonts::DejaVu18);
+		g.setTextColor(kDim, kBg);
+		g.setTextDatum(textdatum_t::middle_center);
+		g.drawString("no data yet", kScreenW / 2, kScreenH / 2);
+		return;
+	}
+	if (d.unread == 0) {
+		g.setFont(&fonts::DejaVu24);
+		g.setTextColor(kGreen, kBg);
+		g.setTextDatum(textdatum_t::middle_center);
+		g.drawString("inbox clear", kScreenW / 2, kScreenH / 2);
+		return;
+	}
+
+	if (d.unread > d.notification_count) {
+		snprintf(buf, sizeof(buf), "%d unread in %d %s  \xC2\xB7  newest %d",
+		         d.unread, d.repos, d.repos == 1 ? "repo" : "repos", d.notification_count);
 	} else {
 		snprintf(buf, sizeof(buf), "%d unread in %d %s", d.unread, d.repos, d.repos == 1 ? "repo" : "repos");
-		g.setFont(&fonts::DejaVu12);
-		g.setTextColor(kDim, kCard);
-		g.drawString(buf, lx + 16, ly + 42);
-
-		int y = ly + 70;
-		for (uint8_t i = 0; i < d.notification_count; i++) {
-			const Notification &n = d.notifications[i];
-			g.setFont(&fonts::DejaVu12);
-			g.setTextColor(kText, kCard);
-			g.drawString(n.repo, lx + 16, y);
-			snprintf(buf, sizeof(buf), "%s%s%s", n.reason, n.type[0] ? " \xC2\xB7 " : "", n.type);
-			g.setFont(&fonts::DejaVu9);
-			g.setTextColor(kDim, kCard);
-			g.drawString(buf, lx + 16, y + 15);
-			y += 34;
-		}
-		if (d.unread > d.notification_count) {
-			snprintf(buf, sizeof(buf), "+%d more", d.unread - d.notification_count);
-			g.setFont(&fonts::DejaVu9);
-			g.setTextColor(kDim, kCard);
-			g.drawString(buf, lx + 16, y);
-		}
 	}
+	g.setFont(&fonts::DejaVu12);
+	g.setTextColor(kDim, kBg);
+	g.drawString(buf, 16, 50);
 
-	// Top right: Claude, with the dates the gauges have no room for.
-	const int rx = 254, rw = 218;
-	card(g, rx, 36, rw, 104);
-	label(g, "CLAUDE", rx + 16, 54, kCard);
-	g.setTextDatum(textdatum_t::middle_left);
-	if (!d.have_claude) {
-		g.setFont(&fonts::DejaVu12);
-		g.setTextColor(kDim, kCard);
-		g.drawString("no data yet", rx + 16, 82);
-	} else {
-		const struct {
-			const char *name;
-			float pct;
-			time_t reset;
-		} windows[2] = {
-		    {"5-hour", d.five_hour_pct, d.five_hour_resets_at},
-		    {"7-day", d.seven_day_pct, d.seven_day_resets_at},
-		};
-		int y = 76;
-		for (int i = 0; i < 2; i++) {
-			// One decimal: the gauge rounds, and the difference matters when
-			// you are deciding whether to start something.
-			snprintf(buf, sizeof(buf), "%s  %.1f%%", windows[i].name, windows[i].pct);
+	// Two lines per entry: the repository large enough to read across a room,
+	// the why-and-what beneath it.
+	for (uint8_t i = 0; i < d.notification_count; i++) {
+		const Notification &n = d.notifications[i];
+		const int y = 78 + i * 34;
+
+		g.setFont(&fonts::DejaVu18);
+		g.setTextColor(kText, kBg);
+		g.setTextDatum(textdatum_t::middle_left);
+		g.drawString(n.repo, 20, y);
+
+		format_age(n.updated_at, now, buf, sizeof(buf));
+		if (buf[0] != '\0') {
 			g.setFont(&fonts::DejaVu12);
-			g.setTextColor(usage_color(windows[i].pct), kCard);
-			g.drawString(buf, rx + 16, y);
-			format_reset_full(windows[i].reset, buf, sizeof(buf));
-			g.setFont(&fonts::DejaVu9);
-			g.setTextColor(kDim, kCard);
-			g.drawString(buf, rx + 16, y + 15);
-			y += 36;
+			g.setTextColor(kDim, kBg);
+			g.setTextDatum(textdatum_t::middle_right);
+			g.drawString(buf, kScreenW - 20, y);
 		}
-	}
 
-	// Bottom right: the forecast spelled out, so an ambiguous icon can always
-	// be resolved by reading the name.
-	card(g, rx, 148, rw, 164);
-	label(g, "WEATHER", rx + 16, 166, kCard);
-	g.setTextDatum(textdatum_t::middle_left);
-	if (!d.have_weather) {
+		snprintf(buf, sizeof(buf), "%s%s%s", n.reason, n.type[0] ? "  \xC2\xB7  " : "", n.type);
 		g.setFont(&fonts::DejaVu12);
-		g.setTextColor(kDim, kCard);
-		g.drawString("no forecast yet", rx + 16, 194);
-	} else {
-		int y = 190;
-		for (uint8_t i = 0; i < d.hour_count; i++) {
-			const HourForecast &h = d.hours[i];
-			struct tm lt;
-			localtime_r(&h.at, &lt);
-			strftime(buf, sizeof(buf), "%H", &lt);
-			g.setFont(&fonts::DejaVu12);
-			g.setTextColor(kDim, kCard);
-			g.drawString(buf, rx + 16, y);
-
-			snprintf(buf, sizeof(buf), "%.1f\xC2\xB0", h.temperature_c);
-			g.setTextColor(h.temperature_c < 0 ? kBlue : kText, kCard);
-			g.drawString(buf, rx + 44, y);
-
-			symbol_label(h.symbol, buf, sizeof(buf));
-			g.setFont(&fonts::DejaVu9);
-			g.setTextColor(kDim, kCard);
-			g.drawString(buf, rx + 96, y);
-
-			if (h.precipitation_mm > 0.05f) {
-				snprintf(buf, sizeof(buf), "%.1f", h.precipitation_mm);
-				g.setTextColor(kBlue, kCard);
-				g.setTextDatum(textdatum_t::middle_right);
-				g.drawString(buf, rx + rw - 12, y);
-				g.setTextDatum(textdatum_t::middle_left);
-			}
-			y += 20;
-		}
+		g.setTextColor(kBlue, kBg);
+		g.setTextDatum(textdatum_t::middle_left);
+		g.drawString(buf, 20, y + 17);
 	}
 }
 

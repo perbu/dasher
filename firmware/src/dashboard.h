@@ -7,14 +7,17 @@
 // dasher publishes at most 6 hours of forecast (internal/fetchers/yr.go).
 static const size_t kMaxHours = 6;
 
-// Only as many notifications as the detail view has room to list. The payload
-// can carry up to 50; keeping them all would cost RAM for rows nobody sees.
-static const size_t kMaxNotifications = 6;
+// Exactly as many notifications as the detail view has room to list at 34px
+// per two-line row. The payload can carry up to 50; keeping them all would
+// cost RAM for rows nobody sees. Raising this without changing the row
+// spacing in ui_render_detail pushes the last entry off the bottom.
+static const size_t kMaxNotifications = 7;
 
 struct Notification {
 	char repo[40];   // "owner/name", truncated if longer
 	char reason[20]; // "mention", "review_requested", ...
 	char type[20];   // "PullRequest", "Issue", ...
+	time_t updated_at;
 };
 
 struct HourForecast {
