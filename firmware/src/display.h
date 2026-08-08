@@ -53,7 +53,10 @@ public:
 			cfg.dummy_read_bits = 1;
 			cfg.readable = false;
 			cfg.invert = false;
-			cfg.rgb_order = false;
+			// The panel is BGR: without this an orange sun renders blue.
+			// Whites, greys and greens survive the swap unchanged, so it only
+			// shows up on saturated colours.
+			cfg.rgb_order = true;
 			cfg.dlen_16bit = false;
 			cfg.bus_shared = false;
 			_panel.config(cfg);
