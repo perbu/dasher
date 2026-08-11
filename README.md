@@ -1,8 +1,9 @@
 # dasher
 
 Lightweight Go backend that aggregates data from GitHub, Claude (Anthropic)
-and Yr.no (MET Norway), and serves it to an ESP32 dashboard over an embedded
-MQTT broker (mutual TLS, retained messages).
+and Yr.no (MET Norway), watches for your laptop on the LAN, and serves it to
+an ESP32 dashboard over an embedded MQTT broker (mutual TLS, retained
+messages).
 
 ## Build
 
@@ -58,6 +59,10 @@ yr:
 
 publish:
   interval: 30s              # heartbeat ceiling, not a fixed cadence
+
+presence:
+  host: 192.168.1.50         # your laptop; omit to disable the check
+  interval: 30s
 ```
 
 Durations use Go syntax (`30s`, `5m`, `1h`). Required values: `mqtt.tls_cert`,
@@ -69,6 +74,21 @@ first rotation the cache is the authoritative copy.
 
 The `yr.user_agent` must identify the app with a contact address —
 MET Norway rejects placeholder User-Agents with `403`.
+
+## Presence detection
+
+With `presence.host` set, dasher pings that host (one ICMP echo per
+`presence.interval`, via the system `ping` — no root needed) and publishes the
+result as `presence.home` in the payload. The ESP32 turns its backlight off
+while the host is silent and back on when it answers again, so the panel goes
+dark when you take your laptop off the network. The store is only updated when
+the answer changes, so a steady state costs no extra publishes. The check
+shells out rather than speaking raw ICMP itself; a missing `ping` binary is a
+logged fetch error, a silent host is simply "away".
+
+The host must actually answer pings: on macOS that means Stealth Mode off
+(System Settings → Network → Firewall → Options). A firewall that drops ICMP
+reads as a permanent absence and the screen stays off.
 
 ## Claude credentials
 
@@ -326,12 +346,13 @@ Published to `dashboard/data` with `retain=true`, QoS 1:
   },
   "weather": [
     { "time": "2026-08-05T18:00:00Z", "temperature_c": 17.6, "precipitation_mm": 0.9, "symbol": "rain" }
-  ]
+  ],
+  "presence": { "home": true }
 }
 ```
 
-`github`, `claude` and `weather` are omitted until the first successful
-fetch of each source.
+`github`, `claude`, `weather` and `presence` are omitted until the first
+successful fetch of each source.
 
 The usage endpoint returns roughly 1.8 KB — per-model breakdowns, spend, and
 a number of unreleased feature flags. Only the four fields above are published
@@ -365,7 +386,9 @@ forecast hour with its `symbol_code` spelled out, so an ambiguous icon can
 always be resolved by reading it. Tap again to close, or let it fall back on
 its own after 45 seconds. A **long press** (700 ms) toggles the backlight
 between full and dim; it fires while your finger is still down, so the
-screen tells you when you have held it long enough.
+screen tells you when you have held it long enough. Presence overrides both:
+while `presence.home` is false the backlight is off regardless of the toggle,
+and the previous level returns when you do.
 
 Drawing is LovyanGFX directly — no LVGL. The whole frame is composed in a
 480×320 sprite in PSRAM and pushed in one operation, so the panel never
@@ -458,7 +481,7 @@ config.yaml              example configuration
 internal/config/         YAML configuration
 internal/broker/         embedded MQTT broker (mTLS + ACL)
 internal/state/          shared aggregated payload
-internal/fetchers/       github / claude / yr background tickers
+internal/fetchers/       github / claude / yr / presence background tickers
 internal/publisher/      periodic retained publish to the topic
 scripts/                 CA management, firmware cert generation
 firmware/                PlatformIO project for the WT32-SC01 display

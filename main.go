@@ -67,11 +67,17 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-	for name, run := range map[string]func(context.Context){
+	runners := map[string]func(context.Context){
 		"github": fetchers.NewGitHub(cfg.GitHub, store).Run,
 		"claude": claude.Run,
 		"yr":     fetchers.NewYr(cfg.Yr, store).Run,
-	} {
+	}
+	// Presence is optional: no host configured, no check.
+	if cfg.Presence.Host != "" {
+		runners["presence"] = fetchers.NewPresence(cfg.Presence, store).Run
+		log.Printf("[presence] watching %s every %s", cfg.Presence.Host, cfg.Presence.Interval)
+	}
+	for name, run := range runners {
 		wg.Add(1)
 		go func(name string, run func(context.Context)) {
 			defer wg.Done()

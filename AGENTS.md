@@ -5,11 +5,11 @@ Guidance for AI agents working in this repository.
 ## What this is
 
 `dasher` — a single-binary Go service that aggregates GitHub notifications,
-Claude usage metrics, and Yr.no (MET Norway) weather, then publishes the
-result as retained JSON on an embedded MQTT broker (mutual TLS, read-only
-ACL on the data topic) for an ESP32 dashboard. Publishing is internal-only
-via the broker's inline client. No tests exist yet; verification is done by
-building and running the binary.
+Claude usage metrics, and Yr.no (MET Norway) weather, and pings a configured
+host for presence, then publishes the result as retained JSON on an embedded
+MQTT broker (mutual TLS, read-only ACL on the data topic) for an ESP32
+dashboard. Publishing is internal-only via the broker's inline client. No
+tests exist yet; verification is done by building and running the binary.
 
 `firmware/` is the other half: a PlatformIO/Arduino project for the
 Wireless-Tag **WT32-SC01 Plus** (ESP32-S3, 16MB flash, 2MB PSRAM, 480x320
@@ -102,6 +102,12 @@ pio device monitor -b 115200             # serial log
   binary for `CLIENT_ID:"` rather than guessing from a bare UUID list.
 - Verify changes by running the service against a self-signed cert and a
   real MQTT client, not just by compiling.
+- The presence check shells out to `ping` rather than speaking raw ICMP (no
+  root, no dependency). `-W` is not portable: Linux takes seconds, macOS
+  milliseconds — `ping()` in `presence.go` branches on `runtime.GOOS`. The
+  store is only updated when the answer changes, so steady state costs no
+  publishes; do not "simplify" it into a SetPresence per tick. A host that
+  drops ICMP (macOS Stealth Mode) reads as a permanent absence.
 
 ### Firmware
 
@@ -121,6 +127,11 @@ pio device monitor -b 115200             # serial log
 - The frame is composed in a PSRAM sprite and pushed once. Drawing straight
   to the panel per widget would tear; keep `ui.cpp` rendering into the
   `LGFXBase&` it is handed.
+- Backlight is set in one place in `loop()`: presence (`presence.home` false)
+  forces it off and wins over the long-press bright/dim toggle. `home`
+  defaults true and `have_presence` false, so a dasher without the check
+  configured never blanks the screen. Don't sprinkle `setBrightness` calls
+  elsewhere.
 - Layout constants live in `theme.h`, not scattered through `ui.cpp`.
 - `Serial` only works with `-DARDUINO_USB_CDC_ON_BOOT=1` (native USB, no UART
   bridge). Dropping that flag makes a healthy board look bricked.

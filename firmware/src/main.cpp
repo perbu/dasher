@@ -17,6 +17,7 @@ static LGFX_Sprite footer(&display);
 static Dashboard data;
 static bool frame_dirty = true;
 static bool bright = true;
+static int applied_brightness = -1; // what the backlight was last set to
 static uint32_t last_footer_ms = 0;
 
 // Short tap opens or closes the detail view; holding toggles the backlight.
@@ -96,6 +97,14 @@ void loop() {
 		frame_dirty = true;
 	}
 
+	// Presence wins over the manual toggle: nobody home, backlight off. The
+	// bright/dim choice survives and is restored when the host comes back.
+	const uint8_t want = (!data.have_presence || data.home) ? (bright ? BRIGHTNESS_FULL : BRIGHTNESS_DIM) : 0;
+	if (want != applied_brightness) {
+		display.setBrightness(want);
+		applied_brightness = want;
+	}
+
 	if (frame_dirty) {
 		if (detail_view) {
 			// Covers the whole panel, footer band included.
@@ -129,7 +138,6 @@ void loop() {
 		long_press_fired = false;
 	} else if (pressed && !long_press_fired && now - touch_started_ms >= kLongPressMs) {
 		bright = !bright;
-		display.setBrightness(bright ? BRIGHTNESS_FULL : BRIGHTNESS_DIM);
 		long_press_fired = true;
 	} else if (!pressed && touch_down && !long_press_fired) {
 		detail_view = !detail_view;

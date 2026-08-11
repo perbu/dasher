@@ -20,6 +20,13 @@ type Payload struct {
 	GitHub    *GitHubData    `json:"github,omitempty"`
 	Claude    *ClaudeData    `json:"claude,omitempty"`
 	Weather   []HourForecast `json:"weather,omitempty"`
+	Presence  *PresenceData  `json:"presence,omitempty"`
+}
+
+// PresenceData reports whether the owner is on the network. The device turns
+// its screen off while Home is false.
+type PresenceData struct {
+	Home bool `json:"home"`
 }
 
 // ClaudeData holds the Claude usage metrics the dashboard renders. The usage
@@ -73,6 +80,14 @@ func (s *Store) SetWeather(f []HourForecast) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.payload.Weather = f
+	s.payload.UpdatedAt = time.Now().UTC()
+}
+
+// SetPresence records the latest presence check result.
+func (s *Store) SetPresence(home bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.payload.Presence = &PresenceData{Home: home}
 	s.payload.UpdatedAt = time.Now().UTC()
 }
 

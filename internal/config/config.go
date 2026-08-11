@@ -11,11 +11,12 @@ import (
 
 // Config is the root configuration for the service.
 type Config struct {
-	MQTT    MQTTConfig
-	GitHub  GitHubConfig
-	Claude  ClaudeConfig
-	Yr      YrConfig
-	Publish PublishConfig
+	MQTT     MQTTConfig
+	GitHub   GitHubConfig
+	Claude   ClaudeConfig
+	Yr       YrConfig
+	Publish  PublishConfig
+	Presence PresenceConfig
 }
 
 // MQTTConfig configures the embedded broker.
@@ -55,6 +56,13 @@ type YrConfig struct {
 
 // PublishConfig configures the MQTT publisher.
 type PublishConfig struct {
+	Interval time.Duration
+}
+
+// PresenceConfig configures the network presence check. An empty Host
+// disables the check entirely.
+type PresenceConfig struct {
+	Host     string
 	Interval time.Duration
 }
 
@@ -105,6 +113,10 @@ type fileConfig struct {
 	Publish struct {
 		Interval duration `yaml:"interval"`
 	} `yaml:"publish"`
+	Presence struct {
+		Host     string   `yaml:"host"`
+		Interval duration `yaml:"interval"`
+	} `yaml:"presence"`
 }
 
 // Load reads configuration from the YAML file at path. If requireTLS is
@@ -126,6 +138,7 @@ func Load(path string, requireTLS bool) (*Config, error) {
 	fc.Claude.Interval = duration(5 * time.Minute)
 	fc.Yr.Interval = duration(15 * time.Minute)
 	fc.Publish.Interval = duration(30 * time.Second)
+	fc.Presence.Interval = duration(30 * time.Second)
 
 	if err := yaml.Unmarshal([]byte(os.ExpandEnv(string(data))), &fc); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
@@ -157,6 +170,10 @@ func Load(path string, requireTLS bool) (*Config, error) {
 		},
 		Publish: PublishConfig{
 			Interval: time.Duration(fc.Publish.Interval),
+		},
+		Presence: PresenceConfig{
+			Host:     fc.Presence.Host,
+			Interval: time.Duration(fc.Presence.Interval),
 		},
 	}
 	if fc.Yr.Lat != nil {

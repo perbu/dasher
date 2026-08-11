@@ -49,6 +49,7 @@ bool dashboard_parse(const char *json, size_t len, Dashboard &out) {
 	filter["weather"][0]["temperature_c"] = true;
 	filter["weather"][0]["precipitation_mm"] = true;
 	filter["weather"][0]["symbol"] = true;
+	filter["presence"]["home"] = true;
 
 	JsonDocument doc;
 	DeserializationError err = deserializeJson(doc, json, len, DeserializationOption::Filter(filter));
@@ -122,6 +123,12 @@ bool dashboard_parse(const char *json, size_t len, Dashboard &out) {
 			d.hour_count++;
 		}
 		d.have_weather = d.hour_count > 0;
+	}
+
+	JsonObjectConst pr = doc["presence"].as<JsonObjectConst>();
+	if (!pr.isNull()) {
+		d.have_presence = true;
+		d.home = pr["home"] | true;
 	}
 
 	out = d;

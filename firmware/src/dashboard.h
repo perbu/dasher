@@ -46,6 +46,11 @@ struct Dashboard {
 	bool have_weather = false;
 	HourForecast hours[kMaxHours];
 	uint8_t hour_count = 0;
+
+	// Absent from the payload until the presence check's first ping; home
+	// defaults true so a dasher without the check never blanks the screen.
+	bool have_presence = false;
+	bool home = true;
 };
 
 // Parses a published payload into out. Returns false and leaves out untouched

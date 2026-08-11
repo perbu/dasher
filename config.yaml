@@ -36,3 +36,11 @@ publish:
   # Payloads are published as soon as a fetch lands; this is the heartbeat
   # ceiling, i.e. the longest the retained message goes without a refresh.
   interval: 30s
+
+# Presence detection: pings a host on the LAN (typically your laptop); while
+# it does not answer, the device is assumed unattended and turns its screen
+# off. Omit host to disable the check. The host must answer ICMP — on macOS
+# that means Stealth Mode off in the firewall settings.
+presence:
+  host: 192.168.1.50
+  interval: 30s
