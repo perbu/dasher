@@ -1,9 +1,9 @@
 # dasher
 
-Lightweight Go backend that aggregates data from GitHub, Claude (Anthropic)
-and Yr.no (MET Norway), watches for your laptop on the LAN, and serves it to
-an ESP32 dashboard over an embedded MQTT broker (mutual TLS, retained
-messages).
+Lightweight Go backend that aggregates data from GitHub, Claude (Anthropic),
+Google Calendar and Yr.no (MET Norway), watches for your laptop on the LAN,
+and serves it to an ESP32 dashboard over an embedded MQTT broker (mutual TLS,
+retained messages).
 
 ## Build
 
@@ -57,6 +57,14 @@ yr:
   user_agent: "dasher/per.buer@gmail.com Norge/Oslo/Oslo/Nydalsdammen"
   interval: 15m
 
+calendar:                    # optional; omit (or empty client_id) to disable
+  refresh_token: ${GOOGLE_REFRESH_TOKEN}
+  client_id: ${GOOGLE_CLIENT_ID}
+  client_secret: ${GOOGLE_CLIENT_SECRET}
+  token_cache: google-token.json
+  calendar_id: primary
+  interval: 2m
+
 publish:
   interval: 30s              # heartbeat ceiling, not a fixed cadence
 
@@ -74,6 +82,27 @@ first rotation the cache is the authoritative copy.
 
 The `yr.user_agent` must identify the app with a contact address —
 MET Norway rejects placeholder User-Agents with `403`.
+
+## Google Calendar credentials
+
+The calendar fetcher shows the next upcoming event from one calendar. It
+needs an OAuth client of your own: create a Google Cloud project, enable the
+**Google Calendar API**, configure the OAuth consent screen (External,
+testing mode is fine — add yourself as a test user), and create an OAuth
+client of type **Desktop**. That gives you the `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET`.
+
+The refresh token must be issued by that same client with the scope
+`https://www.googleapis.com/auth/calendar.readonly`. The quickest path is the
+[OAuth 2.0 playground](https://developers.google.com/oauthplayground/): under
+its settings, tick "Use your own OAuth credentials" and enter the client
+id/secret, authorize the Calendar read-only scope, and exchange the
+authorization code for tokens. Copy the **refresh token** — access tokens
+last only an hour. dasher mints access tokens itself and writes refreshed
+credentials to `calendar.token_cache` (mode `0600`, gitignored), which then
+outranks the seed in `.env`, exactly like the Claude flow. Google refresh
+tokens do not rotate on use, but the cache is still the only copy of the
+access token, so preserve it across deploys alongside `claude-token.json`.
 
 ## Presence detection
 
@@ -347,12 +376,16 @@ Published to `dashboard/data` with `retain=true`, QoS 1:
   "weather": [
     { "time": "2026-08-05T18:00:00Z", "temperature_c": 17.6, "precipitation_mm": 0.9, "symbol": "rain" }
   ],
-  "presence": { "home": true }
+  "presence": { "home": true },
+  "calendar": { "summary": "Weekly sync", "start": "2026-08-05T18:30:00Z", "end": "2026-08-05T19:00:00Z" }
 }
 ```
 
-`github`, `claude`, `weather` and `presence` are omitted until the first
-successful fetch of each source.
+`github`, `claude`, `weather`, `presence` and `calendar` are omitted until
+the first successful fetch of each source. Once the calendar fetcher has
+run, `calendar` is always present: an empty `summary` means there is no
+upcoming event, and an all-day event carries `all_day: true` with midnight
+UTC as its start.
 
 The usage endpoint returns roughly 1.8 KB — per-model breakdowns, spend, and
 a number of unreleased feature flags. Only the four fields above are published
@@ -376,8 +409,9 @@ chip_id` settles it.
 
 It subscribes to `dashboard/data` over mutual TLS and draws a single fixed
 screen — two Claude ring gauges with their reset times, the GitHub unread
-count and how many repositories it spans, six hours of forecast, and a
-footer carrying the payload's age and link state.
+count and how many repositories it spans, three hours of forecast, the next
+calendar event with a countdown, and a footer carrying the payload's age and
+link state.
 
 Touch has two gestures and no navigation beyond them. A **short tap** opens
 a full-screen detail view: the newest notifications with their repo and
@@ -481,7 +515,7 @@ config.yaml              example configuration
 internal/config/         YAML configuration
 internal/broker/         embedded MQTT broker (mTLS + ACL)
 internal/state/          shared aggregated payload
-internal/fetchers/       github / claude / yr / presence background tickers
+internal/fetchers/       github / claude / yr / calendar / presence background tickers
 internal/publisher/      periodic retained publish to the topic
 scripts/                 CA management, firmware cert generation
 firmware/                PlatformIO project for the WT32-SC01 display

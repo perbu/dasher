@@ -15,6 +15,7 @@ type Config struct {
 	GitHub   GitHubConfig
 	Claude   ClaudeConfig
 	Yr       YrConfig
+	Calendar CalendarConfig
 	Publish  PublishConfig
 	Presence PresenceConfig
 }
@@ -52,6 +53,18 @@ type YrConfig struct {
 	Lon       float64
 	UserAgent string
 	Interval  time.Duration
+}
+
+// CalendarConfig configures the Google Calendar fetcher. Like the Claude
+// fetcher it holds a refresh token and mints access tokens itself. The
+// fetcher is optional: an empty ClientID disables it entirely.
+type CalendarConfig struct {
+	RefreshToken string
+	ClientID     string
+	ClientSecret string
+	TokenCache   string
+	CalendarID   string
+	Interval     time.Duration
 }
 
 // PublishConfig configures the MQTT publisher.
@@ -110,6 +123,14 @@ type fileConfig struct {
 		UserAgent string   `yaml:"user_agent"`
 		Interval  duration `yaml:"interval"`
 	} `yaml:"yr"`
+	Calendar struct {
+		RefreshToken string   `yaml:"refresh_token"`
+		ClientID     string   `yaml:"client_id"`
+		ClientSecret string   `yaml:"client_secret"`
+		TokenCache   string   `yaml:"token_cache"`
+		CalendarID   string   `yaml:"calendar_id"`
+		Interval     duration `yaml:"interval"`
+	} `yaml:"calendar"`
 	Publish struct {
 		Interval duration `yaml:"interval"`
 	} `yaml:"publish"`
@@ -137,6 +158,9 @@ func Load(path string, requireTLS bool) (*Config, error) {
 	fc.Claude.TokenCache = "claude-token.json"
 	fc.Claude.Interval = duration(5 * time.Minute)
 	fc.Yr.Interval = duration(15 * time.Minute)
+	fc.Calendar.TokenCache = "google-token.json"
+	fc.Calendar.CalendarID = "primary"
+	fc.Calendar.Interval = duration(2 * time.Minute)
 	fc.Publish.Interval = duration(30 * time.Second)
 	fc.Presence.Interval = duration(30 * time.Second)
 
@@ -167,6 +191,14 @@ func Load(path string, requireTLS bool) (*Config, error) {
 		Yr: YrConfig{
 			UserAgent: fc.Yr.UserAgent,
 			Interval:  time.Duration(fc.Yr.Interval),
+		},
+		Calendar: CalendarConfig{
+			RefreshToken: fc.Calendar.RefreshToken,
+			ClientID:     fc.Calendar.ClientID,
+			ClientSecret: fc.Calendar.ClientSecret,
+			TokenCache:   fc.Calendar.TokenCache,
+			CalendarID:   fc.Calendar.CalendarID,
+			Interval:     time.Duration(fc.Calendar.Interval),
 		},
 		Publish: PublishConfig{
 			Interval: time.Duration(fc.Publish.Interval),

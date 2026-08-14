@@ -27,9 +27,11 @@ static const uint16_t kSnow = RGB565(0xee, 0xf4, 0xfa);
 static const int kScreenW = 480;
 static const int kScreenH = 320;
 
-// Claude card (two gauges), GitHub card, weather strip, then a footer band
-// that is redrawn on its own once a second to age the "updated" line.
+// Claude card (two gauges), GitHub card, then a bottom row split between a
+// three-hour weather strip and the next-meeting card, and a footer band that
+// is redrawn on its own once a second to age the "updated" line.
 static const int kClaudeX = 8, kClaudeY = 8, kClaudeW = 284, kClaudeH = 168;
 static const int kGitHubX = 300, kGitHubY = 8, kGitHubW = 172, kGitHubH = 168;
-static const int kWeatherX = 8, kWeatherY = 184, kWeatherW = 464, kWeatherH = 96;
+static const int kWeatherX = 8, kWeatherY = 184, kWeatherW = 224, kWeatherH = 96;
+static const int kMeetingX = 240, kMeetingY = 184, kMeetingW = 232, kMeetingH = 96;
 static const int kFooterY = 288, kFooterH = 28;

@@ -14,8 +14,10 @@ import (
 
 const yrBaseURL = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
 
-// Yr periodically fetches the weather forecast for the next 6 hours from
-// MET Norway (api.met.no, the data source behind Yr.no).
+// Yr periodically fetches the weather forecast for the next 3 hours from
+// MET Norway (api.met.no, the data source behind Yr.no). The display only
+// has room for three columns since the meeting card took the rest of the
+// strip.
 type Yr struct {
 	cfg    config.YrConfig
 	store  *state.Store
@@ -90,7 +92,7 @@ func (y *Yr) fetch(ctx context.Context) error {
 	}
 
 	now := time.Now().UTC()
-	hours := make([]state.HourForecast, 0, 6)
+	hours := make([]state.HourForecast, 0, 3)
 	for _, ts := range forecast.Properties.Timeseries {
 		if ts.Time.Before(now) {
 			continue
@@ -106,7 +108,7 @@ func (y *Yr) fetch(ctx context.Context) error {
 			h.Symbol = n.Summary.SymbolCode
 		}
 		hours = append(hours, h)
-		if len(hours) == 6 {
+		if len(hours) == 3 {
 			break
 		}
 	}

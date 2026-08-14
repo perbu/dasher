@@ -48,6 +48,23 @@ static void format_reset(time_t t, time_t now, char *buf, size_t n) {
 	}
 }
 
+// "in 25m", "in 3h", "in 2d" — the mirror of format_age, for a meeting that
+// has not started yet. Minutes round up so it never reads "in 0m".
+static void format_in(time_t t, time_t now, char *buf, size_t n) {
+	long in = (long)(t - now);
+	if (in <= 0) {
+		snprintf(buf, n, "now");
+		return;
+	}
+	if (in < 3600) {
+		snprintf(buf, n, "in %ldm", (in + 59) / 60);
+	} else if (in < 86400) {
+		snprintf(buf, n, "in %ldh", in / 3600);
+	} else {
+		snprintf(buf, n, "in %ldd", in / 86400);
+	}
+}
+
 // A ring gauge: full circle, filled clockwise from 12 o'clock. LovyanGFX
 // measures degrees clockwise from 3 o'clock, hence the -90 offset.
 static void gauge(lgfx::LGFXBase &g, int cx, int cy, float pct, bool have, const char *name, const char *reset) {
@@ -183,12 +200,80 @@ static void render_weather(lgfx::LGFXBase &g, const Dashboard &d) {
 	}
 }
 
+// The next calendar event: start time large, the title beneath it, and a
+// countdown that goes amber inside the last quarter hour. main.cpp redraws
+// the frame on each minute rollover so the countdown stays honest.
+static void render_meeting(lgfx::LGFXBase &g, const Dashboard &d, time_t now) {
+	card(g, kMeetingX, kMeetingY, kMeetingW, kMeetingH);
+	label(g, "NEXT", kMeetingX + 16, kMeetingY + 18, kCard);
+
+	const int cx = kMeetingX + kMeetingW / 2;
+	g.setTextDatum(textdatum_t::middle_center);
+
+	if (!d.have_calendar) {
+		g.setFont(&fonts::DejaVu12);
+		g.setTextColor(kDim, kCard);
+		g.drawString("no calendar data", cx, kMeetingY + kMeetingH / 2 + 8);
+		return;
+	}
+	// An empty title is dasher saying the fetch succeeded and found nothing.
+	if (d.meeting_title[0] == '\0') {
+		g.setFont(&fonts::DejaVu18);
+		g.setTextColor(kDim, kCard);
+		g.drawString("no meetings", cx, kMeetingY + kMeetingH / 2 + 4);
+		return;
+	}
+
+	char buf[32];
+	if (d.meeting_all_day) {
+		// The time is midnight UTC and meaningless; the day is the message.
+		struct tm lt, ln;
+		localtime_r(&d.meeting_start, &lt);
+		localtime_r(&now, &ln);
+		if (lt.tm_yday == ln.tm_yday && lt.tm_year == ln.tm_year) {
+			snprintf(buf, sizeof(buf), "today");
+		} else {
+			strftime(buf, sizeof(buf), "%a", &lt);
+		}
+	} else {
+		format_reset(d.meeting_start, now, buf, sizeof(buf));
+	}
+	g.setFont(&fonts::DejaVu24);
+	g.setTextColor(kText, kCard);
+	g.drawString(buf, cx, kMeetingY + 46);
+
+	// Long titles would spill past the card edge, so trim to fit and mark it.
+	char title[68];
+	snprintf(title, sizeof(title), "%s", d.meeting_title);
+	const int maxw = kMeetingW - 24;
+	g.setFont(&fonts::DejaVu12);
+	if (g.textWidth(title) > maxw) {
+		size_t len = strlen(title);
+		while (len > 0 && g.textWidth(title) > maxw - 18) { // 18px for "..."
+			title[--len] = '\0';
+		}
+		strcat(title, "...");
+	}
+	g.setTextColor(kText, kCard);
+	g.drawString(title, cx, kMeetingY + 70);
+
+	if (d.meeting_all_day) {
+		snprintf(buf, sizeof(buf), "all day");
+	} else {
+		format_in(d.meeting_start, now, buf, sizeof(buf));
+	}
+	const long in = (long)(d.meeting_start - now);
+	g.setTextColor(!d.meeting_all_day && in > 0 && in < 900 ? kAmber : kDim, kCard);
+	g.drawString(buf, cx, kMeetingY + 87);
+}
+
 void ui_render(lgfx::LGFXBase &g, const Dashboard &d) {
 	const time_t now = time(nullptr);
 	g.fillScreen(kBg);
 	render_claude(g, d, now);
 	render_github(g, d);
 	render_weather(g, d);
+	render_meeting(g, d, now);
 }
 
 // "4m", "3h", "2d" — enough to tell a fresh notification from one that has

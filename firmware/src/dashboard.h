@@ -4,8 +4,9 @@
 #include <Arduino.h>
 #include <time.h>
 
-// dasher publishes at most 6 hours of forecast (internal/fetchers/yr.go).
-static const size_t kMaxHours = 6;
+// dasher publishes at most 3 hours of forecast (internal/fetchers/yr.go);
+// the meeting card took the other half of the weather strip.
+static const size_t kMaxHours = 3;
 
 // Exactly as many notifications as the detail view has room to list at 34px
 // per two-line row. The payload can carry up to 50; keeping them all would
@@ -51,6 +52,14 @@ struct Dashboard {
 	// defaults true so a dasher without the check never blanks the screen.
 	bool have_presence = false;
 	bool home = true;
+
+	// Next calendar event. have_calendar means dasher's calendar fetcher has
+	// delivered; meeting_start == 0 then means "no upcoming event".
+	bool have_calendar = false;
+	char meeting_title[64];
+	time_t meeting_start = 0;
+	time_t meeting_end = 0;
+	bool meeting_all_day = false;
 };
 
 // Parses a published payload into out. Returns false and leaves out untouched

@@ -77,6 +77,15 @@ func main() {
 		runners["presence"] = fetchers.NewPresence(cfg.Presence, store).Run
 		log.Printf("[presence] watching %s every %s", cfg.Presence.Host, cfg.Presence.Interval)
 	}
+	// Calendar is optional too: no OAuth client id, no fetcher.
+	if cfg.Calendar.ClientID != "" {
+		cal, err := fetchers.NewCalendar(cfg.Calendar, store)
+		if err != nil {
+			log.Fatalf("calendar: %v", err)
+		}
+		runners["calendar"] = cal.Run
+		log.Printf("[calendar] watching %s every %s", cfg.Calendar.CalendarID, cfg.Calendar.Interval)
+	}
 	for name, run := range runners {
 		wg.Add(1)
 		go func(name string, run func(context.Context)) {

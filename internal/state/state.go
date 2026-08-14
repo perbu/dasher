@@ -21,6 +21,17 @@ type Payload struct {
 	Claude    *ClaudeData    `json:"claude,omitempty"`
 	Weather   []HourForecast `json:"weather,omitempty"`
 	Presence  *PresenceData  `json:"presence,omitempty"`
+	Calendar  *CalendarData  `json:"calendar,omitempty"`
+}
+
+// CalendarData describes the next upcoming calendar event. A successful fetch
+// always sets it: an empty Summary means there is no upcoming event, while an
+// absent calendar section means the fetcher has not produced data yet.
+type CalendarData struct {
+	Summary string    `json:"summary"`
+	Start   time.Time `json:"start,omitempty"`
+	End     time.Time `json:"end,omitempty"`
+	AllDay  bool      `json:"all_day,omitempty"`
 }
 
 // PresenceData reports whether the owner is on the network. The device turns
@@ -88,6 +99,14 @@ func (s *Store) SetPresence(home bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.payload.Presence = &PresenceData{Home: home}
+	s.payload.UpdatedAt = time.Now().UTC()
+}
+
+// SetCalendar records the next upcoming calendar event.
+func (s *Store) SetCalendar(d CalendarData) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.payload.Calendar = &d
 	s.payload.UpdatedAt = time.Now().UTC()
 }
 

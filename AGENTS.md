@@ -5,11 +5,12 @@ Guidance for AI agents working in this repository.
 ## What this is
 
 `dasher` — a single-binary Go service that aggregates GitHub notifications,
-Claude usage metrics, and Yr.no (MET Norway) weather, and pings a configured
-host for presence, then publishes the result as retained JSON on an embedded
-MQTT broker (mutual TLS, read-only ACL on the data topic) for an ESP32
-dashboard. Publishing is internal-only via the broker's inline client. No
-tests exist yet; verification is done by building and running the binary.
+Claude usage metrics, the next Google Calendar event, and Yr.no (MET Norway)
+weather, and pings a configured host for presence, then publishes the result
+as retained JSON on an embedded MQTT broker (mutual TLS, read-only ACL on the
+data topic) for an ESP32 dashboard. Publishing is internal-only via the
+broker's inline client. No tests exist yet; verification is done by building
+and running the binary.
 
 `firmware/` is the other half: a PlatformIO/Arduino project for the
 Wireless-Tag **WT32-SC01 Plus** (ESP32-S3, 16MB flash, 2MB PSRAM, 480x320
@@ -108,6 +109,16 @@ pio device monitor -b 115200             # serial log
   store is only updated when the answer changes, so steady state costs no
   publishes; do not "simplify" it into a SetPresence per tick. A host that
   drops ICMP (macOS Stealth Mode) reads as a permanent absence.
+- The calendar fetcher is optional like presence: no `calendar.client_id`, no
+  fetcher. Its OAuth mirrors the Claude one (refresh token + token cache,
+  helpers shared from `claude.go`), but Google's token endpoint wants a
+  **form-encoded** body, not JSON. The events query needs `singleEvents=true`
+  with `orderBy=startTime`, and `timeMin` bounds event **end**, so a meeting
+  in progress is still the "next" one. In the payload, an empty
+  `calendar.summary` means "no upcoming event" — a zero `time.Time` still
+  marshals (`omitempty` does not apply to structs) and would overflow the
+  ESP32's date math, so the firmware keys off the title and never parses the
+  timestamps of an event-less payload.
 
 ### Firmware
 
@@ -133,6 +144,10 @@ pio device monitor -b 115200             # serial log
   configured never blanks the screen. Don't sprinkle `setBrightness` calls
   elsewhere.
 - Layout constants live in `theme.h`, not scattered through `ui.cpp`.
+- The meeting countdown ages between payloads, which arrive minutes apart:
+  `loop()` redraws the whole frame when the wall-clock minute rolls over,
+  gated on a meeting being shown. Payload-driven redraws alone would leave
+  the countdown stale.
 - `Serial` only works with `-DARDUINO_USB_CDC_ON_BOOT=1` (native USB, no UART
   bridge). Dropping that flag makes a healthy board look bricked.
 - `pio device monitor` needs a TTY; read `/dev/cu.usbmodem*` with pyserial

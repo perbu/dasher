@@ -50,6 +50,10 @@ bool dashboard_parse(const char *json, size_t len, Dashboard &out) {
 	filter["weather"][0]["precipitation_mm"] = true;
 	filter["weather"][0]["symbol"] = true;
 	filter["presence"]["home"] = true;
+	filter["calendar"]["summary"] = true;
+	filter["calendar"]["start"] = true;
+	filter["calendar"]["end"] = true;
+	filter["calendar"]["all_day"] = true;
 
 	JsonDocument doc;
 	DeserializationError err = deserializeJson(doc, json, len, DeserializationOption::Filter(filter));
@@ -129,6 +133,20 @@ bool dashboard_parse(const char *json, size_t len, Dashboard &out) {
 	if (!pr.isNull()) {
 		d.have_presence = true;
 		d.home = pr["home"] | true;
+	}
+
+	JsonObjectConst cal = doc["calendar"].as<JsonObjectConst>();
+	if (!cal.isNull()) {
+		d.have_calendar = true;
+		snprintf(d.meeting_title, sizeof(d.meeting_title), "%s", cal["summary"] | "");
+		// An empty summary means "no upcoming event". Its start/end are the
+		// zero time, which would only overflow the civil-date math, so leave
+		// them 0 and let the UI key off the title alone.
+		if (d.meeting_title[0] != '\0') {
+			d.meeting_start = parse_rfc3339(cal["start"] | (const char *)nullptr);
+			d.meeting_end = parse_rfc3339(cal["end"] | (const char *)nullptr);
+			d.meeting_all_day = cal["all_day"] | false;
+		}
 	}
 
 	out = d;

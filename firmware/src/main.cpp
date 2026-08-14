@@ -19,6 +19,7 @@ static bool frame_dirty = true;
 static bool bright = true;
 static int applied_brightness = -1; // what the backlight was last set to
 static uint32_t last_footer_ms = 0;
+static int last_minute = -1; // wall-clock minute of the last frame redraw
 
 // Short tap opens or closes the detail view; holding toggles the backlight.
 static const uint32_t kLongPressMs = 700;
@@ -103,6 +104,19 @@ void loop() {
 	if (want != applied_brightness) {
 		display.setBrightness(want);
 		applied_brightness = want;
+	}
+
+	// The meeting countdown ages between payloads, which arrive minutes
+	// apart: redraw the frame when the wall-clock minute rolls over.
+	if (!detail_view && data.meeting_title[0] != '\0') {
+		const time_t t = time(nullptr);
+		struct tm lt;
+		localtime_r(&t, &lt);
+		const int minute = lt.tm_hour * 60 + lt.tm_min;
+		if (minute != last_minute) {
+			last_minute = minute;
+			frame_dirty = true;
+		}
 	}
 
 	if (frame_dirty) {
