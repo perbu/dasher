@@ -1,6 +1,6 @@
 module dasher
 
-go 1.26.5
+go 1.25
 
 require (
 	github.com/mochi-mqtt/server/v2 v2.7.9
