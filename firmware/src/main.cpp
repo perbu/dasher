@@ -6,6 +6,7 @@
 #include "config.h"
 #include "dashboard.h"
 #include "display.h"
+#include "health.h"
 #include "net.h"
 #include "theme.h"
 #include "ui.h"
@@ -64,6 +65,7 @@ static void on_progress(const char *headline, const char *detail) {
 
 void setup() {
 	Serial.begin(115200);
+	health_begin();
 
 	// Applied to every localtime_r call; the payload itself is UTC.
 	setenv("TZ", TZ_SPEC, 1);
@@ -81,6 +83,9 @@ void setup() {
 		Serial.println("[ui] frame sprite allocation failed, drawing direct");
 	}
 
+	// PSRAM like the frame: 27KB of internal RAM is too much to spend on a
+	// buffer that only needs to be fast enough for once a second.
+	footer.setPsram(true);
 	footer.setColorDepth(16);
 	footer_canvas = footer.createSprite(kScreenW, kFooterH) != nullptr ? (lgfx::LGFXBase *)&footer : (lgfx::LGFXBase *)&display;
 
@@ -90,6 +95,7 @@ void setup() {
 
 void loop() {
 	net_loop();
+	health_loop(net_status().last_message_ms);
 
 	const uint32_t now = millis();
 

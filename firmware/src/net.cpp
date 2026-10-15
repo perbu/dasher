@@ -7,6 +7,7 @@
 
 #include "certs.h"
 #include "config.h"
+#include "health.h"
 
 // dasher publishes the whole notification list, and the GitHub API pages at
 // 50, so a busy inbox reaches a few KB. PubSubClient silently drops anything
@@ -83,6 +84,12 @@ static bool connect_mqtt() {
 	snprintf(detail, sizeof(detail), "%s:%d", MQTT_HOST, MQTT_PORT);
 	progress("connecting to broker", detail);
 
+	// Free whatever the last session left behind before mbedTLS allocates a
+	// new one: its buffers come out of internal RAM, and two at once is more
+	// than a fragmented heap can hold.
+	tls.stop();
+	health_log("mqtt connect");
+
 	if (mqtt.connect(id)) {
 		// Retained, QoS 1: the current payload lands the moment we subscribe.
 		mqtt.subscribe(MQTT_TOPIC, 1);
@@ -97,6 +104,7 @@ static bool connect_mqtt() {
 	int tls_err = tls.lastError(err, sizeof(err));
 	snprintf(status.detail, sizeof(status.detail), "mqtt rc %d", mqtt.state());
 	Serial.printf("[net] connect failed: rc=%d tls=%d %s\n", mqtt.state(), tls_err, err);
+	health_log("mqtt failed");
 	status.mqtt_up = false;
 	return false;
 }
@@ -110,6 +118,8 @@ void net_begin(PayloadHandler on_payload, ProgressHandler on_progress) {
 	tls.setCACert(kMqttCaCert);
 	tls.setCertificate(kMqttClientCert);
 	tls.setPrivateKey(kMqttClientKey);
+	// The default is 120s, which would outlast the loop watchdog.
+	tls.setHandshakeTimeout(30);
 
 	mqtt.setServer(MQTT_HOST, MQTT_PORT);
 	mqtt.setCallback(on_message);

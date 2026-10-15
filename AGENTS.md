@@ -159,6 +159,15 @@ pio device monitor -b 115200             # serial log
 - Only `kMaxNotifications` entries are kept from the payload, but every entry
   is still scanned to count distinct repos. Do not "optimise" the loop by
   breaking out early once the array is full.
+- Internal RAM is the scarce heap, not PSRAM: this framework build has
+  `CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC`, so every TLS handshake needs large
+  contiguous internal blocks. Keep sprites (`setPsram(true)`) and ArduinoJson
+  (the `SpiRamAllocator` in `dashboard.cpp`) out of it. `[heap]` lines on
+  Serial report the largest free internal block, which is the number to watch.
+- `health.cpp` reboots after 10 minutes without a payload and stretches the
+  loop watchdog to 180s. The watchdog must outlast net.cpp's blocking
+  connects; raise it if you lengthen any timeout there. The reason for a
+  deliberate reboot survives in RTC memory and is logged on the next boot.
 - The board's flash is 16MB with `default_16MB.csv`; the stock
   `esp32-s3-devkitc-1` definition assumes 8MB and octal PSRAM, so
   `board_upload.flash_size` and `board_build.arduino.memory_type=qio_qspi`

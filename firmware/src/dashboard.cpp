@@ -1,7 +1,23 @@
 #include "dashboard.h"
 
 #include <ArduinoJson.h>
+#include <esp_heap_caps.h>
 #include <string.h>
+
+// A parse makes dozens of small allocations. Left to malloc they land in
+// internal RAM (everything under 4KB does) and fragment the heap that mbedTLS
+// needs in large blocks for its handshake. PSRAM is slower, but a parse every
+// thirty seconds does not notice.
+struct SpiRamAllocator : ArduinoJson::Allocator {
+	void *allocate(size_t size) override {
+		return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+	}
+	void deallocate(void *ptr) override { heap_caps_free(ptr); }
+	void *reallocate(void *ptr, size_t size) override {
+		return heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+	}
+};
+static SpiRamAllocator spiram;
 
 // Days since the Unix epoch for a civil date (Howard Hinnant's algorithm).
 // timegm() is not dependable across newlib builds, and mktime() would apply
@@ -37,7 +53,7 @@ bool dashboard_parse(const char *json, size_t len, Dashboard &out) {
 	// count distinct repositories, but only the newest few are kept in full
 	// for the detail view. Filtering drops the timestamps and subject bodies
 	// nothing renders.
-	JsonDocument filter;
+	JsonDocument filter(&spiram);
 	filter["updated_at"] = true;
 	filter["github"]["unread_notifications"] = true;
 	filter["github"]["notifications"][0]["repo"] = true;
@@ -55,7 +71,7 @@ bool dashboard_parse(const char *json, size_t len, Dashboard &out) {
 	filter["calendar"]["end"] = true;
 	filter["calendar"]["all_day"] = true;
 
-	JsonDocument doc;
+	JsonDocument doc(&spiram);
 	DeserializationError err = deserializeJson(doc, json, len, DeserializationOption::Filter(filter));
 	if (err) {
 		Serial.printf("[payload] deserialize: %s\n", err.c_str());
