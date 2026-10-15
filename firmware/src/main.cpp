@@ -70,7 +70,7 @@ void setup() {
 	tzset();
 
 	display.init();
-	display.setRotation(1); // 480x320 landscape
+	display.setRotation(3); // 480x320 landscape, flipped 180
 	display.setBrightness(BRIGHTNESS_FULL);
 	display.fillScreen(kBg);
 

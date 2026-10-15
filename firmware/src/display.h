@@ -2,8 +2,8 @@
 //
 // ST7796UI on an 8-bit parallel (i8080) bus driven by the S3's LCD_CAM
 // peripheral, FT6336U touch on I2C, PWM backlight on GPIO45. The panel is
-// 320x480 natively; setRotation(1) in main gives the 480x320 landscape the
-// dashboard is laid out for.
+// 320x480 natively; setRotation(3) in main gives the 480x320 landscape the
+// dashboard is laid out for, flipped 180 from the panel's native orientation.
 //
 // The original WT32-SC01 puts the same panel on SPI with a completely
 // different pinout — do not mix the two configurations up.
